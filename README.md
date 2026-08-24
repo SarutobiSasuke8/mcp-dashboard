@@ -32,9 +32,12 @@ python mcp_dashboard.py --report        # append a snapshot to the vault report
 python mcp_dashboard.py --tasks         # file high-severity findings as tasks
 python mcp_dashboard.py --profile coding    # apply a named server set
 python mcp_dashboard.py --list-profiles
+python mcp_dashboard.py --json out.json # machine-readable snapshot (env redacted)
 python mcp_dashboard.py --no-cli        # skip `claude mcp list` (faster)
 python mcp_dashboard.py --demo          # sample data, to preview the visual
 ```
+
+Tests: `python -m unittest discover -s tests` (standard library only).
 
 Windows: `python .\mcp_dashboard.py --serve`.
 Optional: `pip install psutil` for live CPU sampling (and any CPU reading at
@@ -93,8 +96,15 @@ The static HTML cannot change config — control lives in the local server.
 Off removes the server from that agent's config (CLI first, direct file edit
 with a timestamped backup as fallback) and stashes it in
 `mcp-disabled.json`; on restores it. Profiles in `mcp-profiles.json` enable
-a named set and disable everything else, across all agents at once. Bound to
-`127.0.0.1` only. Changes apply to **new** sessions.
+a named set and disable everything else, across all agents at once. Changes
+apply to **new** sessions.
+
+Because this endpoint edits real config, it is defended three ways: it binds
+to loopback only, it rejects requests whose `Host` is not loopback (blocking
+DNS rebinding), and every request carries a per-run token — in the query
+string for the page, in an `X-MCP-Token` header for anything that mutates,
+which a cross-origin page cannot send without a CORS preflight this server
+never grants. Open the URL the command prints; the token is in it.
 
 ## Scheduling
 
@@ -112,10 +122,11 @@ a named set and disable everything else, across all agents at once. Bound to
 | `mcp-provenance.json` | Your provenance labels (committed) |
 | `mcp-profiles.json` | Your named server sets (committed) |
 | `Register-MCPDashboardScan.ps1` | Scheduled-task registration |
+| `tests/` | Test suite (`python -m unittest discover -s tests`) |
 | `<outputs>/MCP Server Dashboard.html` | Generated dashboard |
 | `<outputs>/MCP Directory.md` | Living registry note |
 | `<outputs>/MCP Usage Report.md` | Rolling snapshots (`--report`) |
-| `mcp-registry.json`, `mcp-history.jsonl`, `mcp-probe-cache.json`, `mcp-disabled.json` | Machine-local state (gitignored) |
+| `mcp-registry.json`, `mcp-history.jsonl`, `mcp-probe-cache.json`, `mcp-usage-cache.json`, `mcp-disabled.json` | Machine-local state (gitignored) |
 
 ## Trimming RAM
 

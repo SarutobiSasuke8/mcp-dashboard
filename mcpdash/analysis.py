@@ -2,8 +2,8 @@
 
 import json
 
-from .common import (HISTORY_LIMIT, HISTORY_PATH, days_ago, fmt_mb,
-                     fmt_tokens, load_json)
+from .common import (HISTORY_LIMIT, HISTORY_PATH, atomic_write, days_ago,
+                     fmt_mb, fmt_tokens)
 
 MB = 1024 * 1024
 
@@ -23,6 +23,18 @@ def append_history(servers, now_iso):
     }
     with open(HISTORY_PATH, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(snap) + "\n")
+    _trim_history()
+
+
+def _trim_history(keep=HISTORY_LIMIT * 10):
+    """A scheduled scan appends forever; keep the tail, drop the rest."""
+    try:
+        lines = HISTORY_PATH.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    if len(lines) <= keep * 2:
+        return
+    atomic_write(HISTORY_PATH, "\n".join(lines[-keep:]) + "\n")
 
 
 def load_history():
@@ -53,7 +65,11 @@ def verdict(s, registry_entry=None):
     tokens = s.get("ctx_tokens", 0)
     age = days_ago((registry_entry or {}).get("first_seen"))
     settling = age is not None and age < 7
-    if calls == 0 and not settling and (ram > 50 * MB or tokens > 1500):
+    if settling and calls == 0:
+        # Newly installed and not yet called: no verdict has been earned,
+        # so it must not fall through to a cost-based judgement either.
+        return "quiet"
+    if calls == 0 and (ram > 50 * MB or tokens > 1500):
         return "unused"
     if calls30 == 0 and calls > 0:
         return "dormant"

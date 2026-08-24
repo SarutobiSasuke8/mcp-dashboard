@@ -66,8 +66,44 @@ def load_json(path):
         return None
 
 
+def atomic_write(path, text):
+    """Write via a temporary file in the same directory, then replace.
+
+    Config files edited here belong to other programs; a crash or full disk
+    mid-write must never leave one truncated."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(text)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+
+
 def save_json(path, data):
-    Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
+    atomic_write(path, json.dumps(data, indent=2))
+
+
+def parse_ts(value):
+    """Parse an ISO timestamp to naive local time.
+
+    Transcripts stamp UTC with a trailing Z; comparing that to a local
+    `now()` would skew every age by the UTC offset, so convert first."""
+    if not isinstance(value, str) or not value:
+        return None
+    text = value.strip()
+    try:
+        if text.endswith("Z"):
+            dt = datetime.datetime.fromisoformat(text[:-1]).replace(
+                tzinfo=datetime.timezone.utc)
+        else:
+            dt = datetime.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone().replace(tzinfo=None)
+    return dt
 
 
 def load_toml(path):
@@ -160,13 +196,8 @@ def has_psutil():
 
 
 def days_ago(iso):
-    if not iso:
-        return None
-    try:
-        then = datetime.datetime.fromisoformat(iso[:19])
-    except ValueError:
-        return None
-    return (datetime.datetime.now() - then).days
+    then = parse_ts(iso)
+    return None if then is None else (datetime.datetime.now() - then).days
 
 
 def project_label(path):

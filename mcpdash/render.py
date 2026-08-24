@@ -1,7 +1,6 @@
 """HTML rendering for the MCP Dashboard (Servers / Advisor / Skills)."""
 
 from .common import esc, fmt_mb, fmt_tokens
-from .analysis import verdict as compute_verdict
 
 CSS = """
 :root {
@@ -266,7 +265,7 @@ def hbar_list(rows, unit=""):
 # ---------------------------------------------------------------------------
 
 def render_html(servers, skills, history, recs, secrets, shadowed, meta,
-                profiles=None, live=False):
+                profiles=None, live=False, token=""):
     stdio = sorted([s for s in servers if s["transport"] == "stdio"],
                    key=lambda s: (-s.get("ram_bytes", 0), s["name"]))
     remote = sorted([s for s in servers if s["transport"] != "stdio"],
@@ -445,8 +444,10 @@ def render_html(servers, skills, history, recs, secrets, shadowed, meta,
 
     live_js = """
 <script>
+var MCP_TOKEN = '__TOKEN__';
 function post(url, body, ok) {
-  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/json',
+      'X-MCP-Token': MCP_TOKEN},
     body: JSON.stringify(body)}).then(r => r.json()).then(j => {
       if (!j.ok) { alert('Failed: ' + j.message); ok(false); }
       else { location.reload(); }
@@ -474,7 +475,7 @@ document.querySelectorAll('button[data-profile]').forEach(function (btn) {
          function () { btn.disabled = false; });
   });
 });
-</script>"""
+</script>""".replace("__TOKEN__", token)
 
     cpu_note = ("a live sample" if meta.get("psutil")
                 else "the process-lifetime average (install psutil for live sampling)")

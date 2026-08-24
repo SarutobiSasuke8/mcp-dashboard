@@ -31,16 +31,24 @@ def parse_skill_md(path):
 
 
 def discover_skills():
-    skills, order = [], []
+    skills, seen_paths = [], set()
 
     def scan_root(root, source):
+        """Roots are scanned in precedence order; a file already claimed by
+        an earlier root is not re-listed. Without this, `~/.claude/skills`
+        and its own `synced/` subfolder both claim the same SKILL.md and
+        every synced skill looks like a name collision with itself."""
         root = Path(root)
         if not root.is_dir():
             return
         for md in sorted(root.glob("*/SKILL.md")) + sorted(root.glob("*/*/SKILL.md")):
+            resolved = md.resolve()
+            if resolved in seen_paths:
+                continue
             info = parse_skill_md(md)
             if not info:
                 continue
+            seen_paths.add(resolved)
             info["source"] = source
             skills.append(info)
 
@@ -48,8 +56,8 @@ def discover_skills():
     cwd = Path(os.getcwd())
     if cwd != VAULT_ROOT:
         scan_root(cwd / ".claude" / "skills", "project")
-    scan_root(Path.home() / ".claude" / "skills", "user")
     scan_root(Path.home() / ".claude" / "skills" / "synced", "synced")
+    scan_root(Path.home() / ".claude" / "skills", "user")
     plugins_root = Path.home() / ".claude" / "plugins"
     if plugins_root.is_dir():
         for plugdir in sorted(p for p in plugins_root.iterdir() if p.is_dir()):

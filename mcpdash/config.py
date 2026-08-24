@@ -92,13 +92,15 @@ def detect_provenance(entry, overrides):
         return "self-built", "auto"
 
     packages = [a for a in args if not a.startswith("-") and
-                (a.startswith("@") or re.match(r"^[\w-]+(@[\w.^~-]+)?$", a))]
-    for p in packages:
-        if p.startswith(OFFICIAL_PREFIXES):
+                (a.startswith("@") or "/" in a
+                 or re.match(r"^[\w-]+(@[\w.^~-]+)?$", a))]
+    for pkg in packages:
+        if pkg.startswith(OFFICIAL_PREFIXES):
             return "official", "auto"
-        if p.startswith(VENDOR_PREFIXES):
+        if pkg.startswith(VENDOR_PREFIXES):
             return "vendor", "auto"
-    if any("@" in a or "/" in a for a in packages):
+    # A scoped or owner/name package published by someone else.
+    if any("@" in pkg or "/" in pkg for pkg in packages):
         return "community", "auto"
     return "unknown", "auto"
 

@@ -198,17 +198,29 @@ def probe_server(cfg, timeout=25):
         return result
 
     env = {**os.environ, **{k: str(v) for k, v in (cfg.get("env") or {}).items()}}
-    argv = [str(command)] + [str(a) for a in cfg.get("args", [])]
+    args = [str(a) for a in cfg.get("args", [])]
     started = time.time()
-    try:
-        proc = subprocess.Popen(
-            argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, encoding="utf-8",
-            errors="replace", bufsize=1, env=env,
-            cwd=cfg.get("cwd") or None,
-            shell=(platform.system() == "Windows"))
-    except OSError as exc:
-        result["error"] = f"failed to start: {exc}"
+
+    # Never run through a shell: server commands come from config files and
+    # may contain characters a shell would interpret. On Windows, npm-style
+    # shims are .cmd/.exe files, so resolve those explicitly instead.
+    candidates = [str(command)]
+    if platform.system() == "Windows" and not os.path.splitext(str(command))[1]:
+        candidates = [str(command) + ext for ext in (".cmd", ".exe", ".bat")] + candidates
+
+    proc = last_err = None
+    for exe in candidates:
+        try:
+            proc = subprocess.Popen(
+                [exe] + args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, encoding="utf-8",
+                errors="replace", bufsize=1, env=env,
+                cwd=cfg.get("cwd") or None)
+            break
+        except OSError as exc:
+            last_err = exc
+    if proc is None:
+        result["error"] = f"failed to start: {last_err}"
         return result
 
     q = queue.Queue()
@@ -278,6 +290,11 @@ def probe_server(cfg, timeout=25):
         except Exception:
             try:
                 proc.kill()
+            except Exception:
+                pass
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            try:
+                stream.close()
             except Exception:
                 pass
 

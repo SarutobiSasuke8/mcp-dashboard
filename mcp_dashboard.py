@@ -24,6 +24,7 @@ import argparse
 import datetime
 import json
 import platform
+import secrets
 import sys
 import webbrowser
 from pathlib import Path
@@ -32,8 +33,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mcpdash import analysis, config, probe, render, skills, usage, vaultout  # noqa: E402
 from mcpdash.common import (DEFAULT_HTML, DEFAULT_NOTE, DISABLED_PATH,  # noqa: E402
-                            PROBE_CACHE_PATH, PROFILES_PATH, PROVENANCE_PATH,
-                            fmt_mb, fmt_tokens, has_psutil, load_json, save_json)
+                            PROBE_CACHE_PATH, PROVENANCE_PATH, fmt_mb,
+                            has_psutil, load_json, save_json)
 from mcpdash.demo import demo_data  # noqa: E402
 
 
@@ -49,14 +50,18 @@ def ensure_side_files():
 
 
 def scan(use_cli=True, do_probe=False, probe_timeout=25):
-    """Full scan: config, processes, usage, probe cache, verdicts."""
+    """Full scan: config, processes, usage, probe cache, verdicts.
+
+    Returns (servers, skill_usage) — transcripts are parsed once per run and
+    the skill half handed back, so nothing re-reads them downstream."""
     servers = config.discover_servers()
     status = {} if not use_cli else claude_status()
     probe.measure_usage(servers, probe.list_processes())
     if do_probe:
         probe.probe_all(servers, timeout=probe_timeout)
     probe.attach_probe(servers)
-    usage.attach_usage(servers, usage.collect_usage()[0])
+    server_usage, skill_usage = usage.collect_usage()
+    usage.attach_usage(servers, server_usage)
 
     for s in servers:
         if not s.get("enabled", True):
@@ -74,7 +79,7 @@ def scan(use_cli=True, do_probe=False, probe_timeout=25):
     registry = load_json(vaultout.REGISTRY_PATH) or {}
     for s in servers:
         s["verdict"] = analysis.verdict(s, (registry.get("servers") or {}).get(s["key"]))
-    return servers
+    return servers, skill_usage
 
 
 def claude_status():
@@ -94,16 +99,37 @@ def claude_status():
     return status
 
 
-def build_page(servers, skill_list, history, meta, live=False):
-    secrets = config.secret_findings(servers)
+def build_page(servers, skill_list, skill_usage, history, meta, live=False,
+               token=""):
+    found = config.secret_findings(servers)
     registry = load_json(vaultout.REGISTRY_PATH) or {}
-    recs = analysis.recommendations(servers, secrets, registry)
-    server_usage, skill_usage = usage.collect_usage()
+    recs = analysis.recommendations(servers, found, registry)
     shadowed = analysis.skill_findings(skill_list, skill_usage)
-    html = render.render_html(servers, skill_list, history, recs, secrets,
+    html = render.render_html(servers, skill_list, history, recs, found,
                               shadowed, meta, profiles=config.load_profiles(),
-                              live=live)
-    return html, recs, secrets
+                              live=live, token=token)
+    return html, recs, found
+
+
+def export_json(servers, skill_list, recs, totals_d, path):
+    """Machine-readable snapshot for other tools. Config env values are
+    replaced with their variable names only — never write secrets out."""
+    def clean(s):
+        raw = dict(s.get("raw") or {})
+        if raw.get("env"):
+            raw["env"] = {k: "<redacted>" for k in raw["env"]}
+        return {k: v for k, v in
+                {**s, "raw": raw}.items() if k != "token"}
+
+    payload = {
+        "generated": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        "totals": totals_d,
+        "servers": [clean(s) for s in servers],
+        "skills": skill_list,
+        "recommendations": recs,
+    }
+    save_json(path, payload)
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -111,8 +137,17 @@ def build_page(servers, skill_list, history, meta, live=False):
 # ---------------------------------------------------------------------------
 
 def serve(args):
+    """Local control surface.
+
+    This endpoint edits real agent config, so it is defended three ways: it
+    binds to loopback only, it rejects requests whose Host header is not
+    loopback (which blocks DNS rebinding), and every request must carry a
+    per-run token — in the query string for the page, in a custom header for
+    the mutating calls, which a cross-origin page cannot send without a CORS
+    preflight this server never grants."""
     from http.server import HTTPServer, BaseHTTPRequestHandler
 
+    token = secrets.token_urlsafe(16)
     state = {"servers": []}
 
     class Handler(BaseHTTPRequestHandler):
@@ -128,18 +163,40 @@ def serve(args):
             self.wfile.write(data)
 
         def _json_body(self):
-            length = int(self.headers.get("Content-Length", 0))
+            length = min(int(self.headers.get("Content-Length", 0) or 0), 64_000)
             return json.loads(self.rfile.read(length) or b"{}")
+
+        def _local(self):
+            host = (self.headers.get("Host") or "").split(":")[0].strip("[]")
+            if host not in ("127.0.0.1", "localhost", "::1", ""):
+                return False
+            return self.client_address[0] in ("127.0.0.1", "::1")
+
+        def _authorised(self, from_header):
+            if not self._local():
+                return False
+            if from_header:
+                return secrets.compare_digest(
+                    self.headers.get("X-MCP-Token", ""), token)
+            from urllib.parse import parse_qs, urlparse
+            given = parse_qs(urlparse(self.path).query).get("t", [""])[0]
+            return secrets.compare_digest(given, token)
 
         def do_GET(self):
             if self.path.split("?")[0] not in ("/", "/index.html"):
                 self._send(404, "not found", "text/plain")
                 return
+            if not self._authorised(from_header=False):
+                self._send(403, "Forbidden — open the URL printed by the "
+                                "command, which carries this run's token.",
+                           "text/plain")
+                return
             now = datetime.datetime.now()
             now_iso = now.strftime("%Y-%m-%dT%H:%M:%S")
             do_probe = args.probe and not state.get("probed")
-            servers = scan(use_cli=not args.no_cli, do_probe=do_probe,
-                           probe_timeout=args.probe_timeout)
+            servers, skill_usage = scan(use_cli=not args.no_cli,
+                                        do_probe=do_probe,
+                                        probe_timeout=args.probe_timeout)
             state["servers"] = servers
             state["probed"] = True
             analysis.append_history(servers, now_iso)
@@ -152,13 +209,18 @@ def serve(args):
                     "probe_at": max((v.get("at", "") for v in cache.values()),
                                     default="")}
             html, _, _ = build_page(servers, skills.discover_skills(),
-                                    analysis.load_history(), meta, live=True)
+                                    skill_usage, analysis.load_history(), meta,
+                                    live=True, token=token)
             args.html.parent.mkdir(parents=True, exist_ok=True)
             args.html.write_text(html, encoding="utf-8")
             self._send(200, html)
 
         def do_POST(self):
             path = self.path.split("?")[0]
+            if not self._authorised(from_header=True):
+                self._send(403, json.dumps({"ok": False, "message": "forbidden"}),
+                           "application/json")
+                return
             try:
                 body = self._json_body()
                 if path == "/api/toggle":
@@ -182,7 +244,7 @@ def serve(args):
                        "application/json")
 
     httpd = HTTPServer(("127.0.0.1", args.port), Handler)
-    url = f"http://127.0.0.1:{args.port}/"
+    url = f"http://127.0.0.1:{args.port}/?t={token}"
     print(f"Live dashboard at {url}  (Ctrl+C to stop)")
     print(f"Toggles and profiles edit real config; disabled servers are stashed "
           f"in {DISABLED_PATH.name} so they can be switched back on.")
@@ -220,6 +282,9 @@ def main():
     ap.add_argument("--profile", metavar="NAME",
                     help="apply a profile from mcp-profiles.json and exit")
     ap.add_argument("--list-profiles", action="store_true")
+    ap.add_argument("--json", type=Path, metavar="PATH", dest="json_path",
+                    help="also write a machine-readable snapshot (env values "
+                         "redacted) for other tools to consume")
     ap.add_argument("--open", action="store_true", help="open in a browser")
     args = ap.parse_args()
 
@@ -231,7 +296,7 @@ def main():
         return
 
     if args.profile:
-        servers = scan(use_cli=False)
+        servers, _ = scan(use_cli=False)
         ok, msg = config.apply_profile(args.profile, servers)
         print(("Applied" if ok else "Partly applied") + f" profile '{args.profile}': {msg}")
         return
@@ -249,17 +314,18 @@ def main():
     if args.demo:
         servers, skill_list, history, meta_extra = demo_data()
         meta.update(meta_extra)
-        secrets = config.secret_findings(servers)
-        recs = analysis.recommendations(servers, secrets, {"servers": {}})
+        found = config.secret_findings(servers)
+        recs = analysis.recommendations(servers, found, {"servers": {}})
         shadowed = analysis.skill_findings(skill_list, {})
-        html = render.render_html(servers, skill_list, history, recs, secrets,
+        html = render.render_html(servers, skill_list, history, recs, found,
                                   shadowed, meta,
                                   profiles=config.load_profiles(), live=False)
     else:
         if args.probe:
             print("Probing servers (starting each one briefly)…")
-        servers = scan(use_cli=not args.no_cli, do_probe=args.probe,
-                       probe_timeout=args.probe_timeout)
+        servers, skill_usage = scan(use_cli=not args.no_cli,
+                                    do_probe=args.probe,
+                                    probe_timeout=args.probe_timeout)
         by_agent = {}
         for s in servers:
             by_agent[s["agent"]] = by_agent.get(s["agent"], 0) + 1
@@ -270,8 +336,8 @@ def main():
         print(f"Found {len(skill_list)} skill(s).")
         cache = load_json(PROBE_CACHE_PATH) or {}
         meta["probe_at"] = max((v.get("at", "") for v in cache.values()), default="")
-        html, recs, secrets = build_page(servers, skill_list,
-                                         analysis.load_history(), meta)
+        html, recs, found = build_page(servers, skill_list, skill_usage,
+                                       analysis.load_history(), meta)
 
     args.html.parent.mkdir(parents=True, exist_ok=True)
     args.html.write_text(html, encoding="utf-8")
@@ -291,6 +357,9 @@ def main():
         if args.tasks:
             written = vaultout.append_tasks(recs, now_iso)
             print(f"Tasks filed: {len(written)}")
+        if args.json_path:
+            print(f"JSON snapshot -> "
+                  f"{export_json(servers, skill_list, recs, t, args.json_path)}")
 
     if args.open:
         webbrowser.open(args.html.as_uri())
