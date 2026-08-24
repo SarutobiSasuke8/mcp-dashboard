@@ -1,0 +1,4 @@
+{
+  "_help": "Label server provenance here; keys are server names. Values: self-built | official | vendor | community, or {\"provenance\": \"self-built\", \"note\": \"...\"}. Manual labels beat auto-detection.",
+  "_example-my-server": "self-built"
+}

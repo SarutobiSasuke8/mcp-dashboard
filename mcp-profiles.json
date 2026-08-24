@@ -1,0 +1,14 @@
+{
+  "_help": "Named sets of MCP servers. Applying a profile enables every server listed and disables every other togglable server. Use server names as they appear in the dashboard.",
+  "minimal": [],
+  "coding": [
+    "filesystem",
+    "github",
+    "playwright"
+  ],
+  "research": [
+    "fetch",
+    "context7",
+    "memory"
+  ]
+}

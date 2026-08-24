@@ -1,0 +1,7 @@
+mcp-registry.json
+mcp-history.jsonl
+mcp-disabled.json
+mcp-probe-cache.json
+output/
+*.bak-*
+__pycache__/
