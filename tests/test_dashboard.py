@@ -186,6 +186,21 @@ class TestCodexToml(TempHomeCase):
         self.assertEqual(list(restored["args"]), list(original["args"]))
         self.assertEqual(restored["env"]["TOKEN"], "abc123456789")
 
+    def test_enable_fallback_writes_valid_toml_for_windows_paths(self):
+        # Backslashes are escapes inside TOML basic strings, so appending a
+        # Windows-path command as "C:\Users\..." corrupts config.toml.
+        self.write_codex('model = "gpt-5"\n')
+        cfg = {"command": "C:\\Tools\\srv.exe",
+               "args": ["--dir", "C:\\Users\\me\\data"],
+               "env": {"KEY": 'va"lue'}}
+        ok, msg = config.codex_enable({"name": "winsrv", "raw": cfg})
+        self.assertTrue(ok, msg)
+        data = load_toml(self.home / ".codex" / "config.toml")
+        srv = data["mcp_servers"]["winsrv"]
+        self.assertEqual(srv["command"], "C:\\Tools\\srv.exe")
+        self.assertEqual(list(srv["args"]), ["--dir", "C:\\Users\\me\\data"])
+        self.assertEqual(srv["env"]["KEY"], 'va"lue')
+
     def test_fallback_toml_parser_matches_shape(self):
         self.write_codex(self.SAMPLE)
         data = load_toml(self.home / ".codex" / "config.toml")

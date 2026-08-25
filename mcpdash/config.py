@@ -299,6 +299,18 @@ def codex_disable(e):
     return True, "removed by editing config.toml (backup made)"
 
 
+def _toml_str(v):
+    """Serialise one TOML string value. Backslashes are escape characters in
+    basic ("") strings, so a raw Windows path written that way is invalid
+    TOML; prefer a literal ('') string, escaping only when it can't hold
+    the value."""
+    v = str(v)
+    if "'" not in v and "\n" not in v:
+        return f"'{v}'"
+    return '"' + v.replace("\\", "\\\\").replace('"', '\\"') \
+                  .replace("\n", "\\n") + '"'
+
+
 def codex_enable(e):
     cfg = e["raw"] or {}
     cmd = ["codex", "mcp", "add", e["name"]]
@@ -313,15 +325,15 @@ def codex_enable(e):
     backup_file(path)
     lines = [f'\n[mcp_servers.{e["name"]}]']
     if cfg.get("command"):
-        lines.append(f'command = "{cfg["command"]}"')
+        lines.append(f'command = {_toml_str(cfg["command"])}')
     if cfg.get("args"):
-        lines.append("args = [" + ", ".join(f'"{a}"' for a in cfg["args"]) + "]")
+        lines.append("args = [" + ", ".join(_toml_str(a) for a in cfg["args"]) + "]")
     if cfg.get("url"):
-        lines.append(f'url = "{cfg["url"]}"')
+        lines.append(f'url = {_toml_str(cfg["url"])}')
     if cfg.get("env"):
         lines.append(f'\n[mcp_servers.{e["name"]}.env]')
         for k, v in cfg["env"].items():
-            lines.append(f'{k} = "{v}"')
+            lines.append(f'{k} = {_toml_str(v)}')
     with open(path, "a", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
     return True, "restored by appending to config.toml (backup made)"
