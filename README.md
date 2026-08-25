@@ -5,13 +5,14 @@ Gemini CLI, and Cursor** — what each server costs in RAM, CPU, context
 tokens, and startup time, weighed against how often you actually call it,
 with working on/off switches and a skills directory.
 
-Design and build record: `Obsidian Vault Management/Systems/MCP Server Management.md`
-in the vault this was built for.
+Design record: [DESIGN.md](DESIGN.md) — why, how it measures cost, the
+provenance and verdict rules, and how the control endpoint is secured.
 
-**Where outputs go:** when the tool sits inside that Obsidian vault it writes to
-the vault's `Systems/` folder; run from a standalone clone it writes to
-`output/` next to the script instead. Point it anywhere with
-`MCP_DASHBOARD_VAULT` or the `--html` / `--note` flags.
+**Where outputs go:** when the tool sits inside an Obsidian vault (one
+containing an `Obsidian Vault Management/` folder), markdown outputs go to
+that vault's `Systems/` folder; run standalone, they go to `output/` next to
+the script instead. Point it anywhere with `MCP_DASHBOARD_VAULT` or the
+`--html` / `--note` flags.
 
 ## Why
 
