@@ -242,6 +242,10 @@ def claude_disable(e):
     scope, origin = e["scope"], e["origin"]
     cwd = origin if scope == "local" else (
         str(Path(origin).parent) if scope == "project" else None)
+    # The CLI rewrites config with no backup of its own, so take one first —
+    # same guarantee as the direct-edit fallback.
+    backup_file(Path(origin) if scope == "project" else
+                Path.home() / ".claude.json")
     ok, out = run_cli(["claude", "mcp", "remove", e["name"], "-s", scope], cwd=cwd)
     if ok:
         return True, "removed via claude CLI"
@@ -271,6 +275,8 @@ def claude_enable(e):
 
 
 def codex_disable(e):
+    # The CLI rewrites config.toml with no backup of its own; take one first.
+    backup_file(codex_toml_path())
     ok, out = run_cli(["codex", "mcp", "remove", e["name"]])
     if ok:
         return True, "removed via codex CLI"

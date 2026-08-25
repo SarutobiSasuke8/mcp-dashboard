@@ -226,8 +226,9 @@ def probe_server(cfg, timeout=25):
     q = queue.Queue()
     threading.Thread(target=_reader, args=(proc.stdout, q), daemon=True).start()
     errbuf = []
-    threading.Thread(target=lambda: errbuf.extend(proc.stderr or []),
-                     daemon=True).start()
+    err_thread = threading.Thread(target=lambda: errbuf.extend(proc.stderr or []),
+                                  daemon=True)
+    err_thread.start()
 
     def send(obj):
         try:
@@ -264,9 +265,19 @@ def probe_server(cfg, timeout=25):
             "clientInfo": {"name": "mcp-dashboard", "version": "1.0"}}})
         init = await_id(1, deadline)
         if init is None:
-            result["error"] = ("no response to initialize"
-                               if proc.poll() is None else
-                               f"exited with code {proc.poll()}")
+            # The reader can hit EOF an instant before poll() catches up, so
+            # a fast-failing server would report "no response" instead of its
+            # real exit code. Give the process a moment to be reaped, and the
+            # stderr thread a moment to finish, before formatting the error.
+            code = proc.poll()
+            if code is None:
+                try:
+                    code = proc.wait(timeout=1.5)
+                except subprocess.TimeoutExpired:
+                    code = None
+            result["error"] = ("no response to initialize" if code is None
+                               else f"exited with code {code}")
+            err_thread.join(timeout=1)
             result["error"] += _tail(errbuf)
             return result
         if init.get("error"):

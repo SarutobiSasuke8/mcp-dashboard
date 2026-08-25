@@ -330,7 +330,8 @@ def main():
         for s in servers:
             by_agent[s["agent"]] = by_agent.get(s["agent"], 0) + 1
         print(f"Found {len(servers)} MCP server(s): " +
-              ", ".join(f"{n} {a}" for a, n in sorted(by_agent.items())) or "none")
+              (", ".join(f"{n} {a}" for a, n in sorted(by_agent.items()))
+               or "none"))
         analysis.append_history(servers, now_iso)
         skill_list = skills.discover_skills()
         print(f"Found {len(skill_list)} skill(s).")

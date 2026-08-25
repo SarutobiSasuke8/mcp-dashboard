@@ -16,6 +16,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -26,7 +27,19 @@ MB = 1024 * 1024
 
 
 class TempHomeCase(unittest.TestCase):
-    """Runs each test against a throwaway HOME and side-file directory."""
+    """Runs each test against a throwaway HOME and side-file directory.
+
+    Isolation is belt and braces, because these tests exercise code that
+    edits real agent config files:
+
+    - ``Path.home`` is patched directly. Setting the HOME env var is not
+      enough — on Windows ``Path.home()`` resolves via USERPROFILE, so an
+      env-only sandbox silently leaks every mutation onto the real machine.
+    - HOME, USERPROFILE, CODEX_HOME, and GEMINI_HOME all point inside the
+      sandbox for any code that reads them.
+    - ``config.run_cli`` is stubbed to always fail, so no test can shell
+      out to a real `claude`/`codex` CLI and mutate live config that way.
+    """
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -35,9 +48,21 @@ class TempHomeCase(unittest.TestCase):
         (self.home / ".claude").mkdir(parents=True)
         (self.home / ".codex").mkdir(parents=True)
         (self.home / ".gemini").mkdir(parents=True)
-        self._old_home = os.environ.get("HOME")
-        os.environ["HOME"] = str(self.home)
-        Path.home.cache_clear() if hasattr(Path.home, "cache_clear") else None
+        self._env = {}
+        for var, value in (("HOME", str(self.home)),
+                           ("USERPROFILE", str(self.home)),
+                           ("CODEX_HOME", str(self.home / ".codex")),
+                           ("GEMINI_HOME", str(self.home / ".gemini"))):
+            self._env[var] = os.environ.get(var)
+            os.environ[var] = value
+        home = self.home
+        self._patchers = [
+            mock.patch.object(Path, "home", classmethod(lambda cls: home)),
+            mock.patch.object(config, "run_cli",
+                              lambda *a, **k: (False, "CLI disabled in tests")),
+        ]
+        for p in self._patchers:
+            p.start()
         # Side files live next to the script; point them into the sandbox.
         self._patched = {}
         for mod, names in ((config, ("DISABLED_PATH", "PROVENANCE_PATH",
@@ -49,10 +74,13 @@ class TempHomeCase(unittest.TestCase):
     def tearDown(self):
         for (mod, name), value in self._patched.items():
             setattr(mod, name, value)
-        if self._old_home is None:
-            os.environ.pop("HOME", None)
-        else:
-            os.environ["HOME"] = self._old_home
+        for p in self._patchers:
+            p.stop()
+        for var, old in self._env.items():
+            if old is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = old
         self.tmp.cleanup()
 
     def write_claude(self, data):
