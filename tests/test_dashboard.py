@@ -117,6 +117,21 @@ class TestDiscovery(TempHomeCase):
         self.assertEqual(by_name["std"]["transport"], "stdio")
         self.assertEqual(by_name["std"]["command"], "node a.js")
 
+    def test_same_project_server_name_gets_distinct_keys(self):
+        projects = [self.root / "one", self.root / "two"]
+        for project in projects:
+            project.mkdir()
+            (project / ".mcp.json").write_text(json.dumps({"mcpServers": {
+                "filesystem": {"command": "node", "args": [str(project / "srv.js")]}
+            }}), encoding="utf-8")
+        self.write_claude({"projects": {str(project): {} for project in projects}})
+
+        found = [s for s in config.discover_servers()
+                 if s["scope"] == "project" and s["name"] == "filesystem"]
+        self.assertEqual(len(found), 2)
+        self.assertEqual(len({s["key"] for s in found}), 2)
+        self.assertTrue(all(s["origin"] in s["key"] for s in found))
+
 
 class TestProvenance(TempHomeCase):
     def label(self, cfg, overrides=None):
@@ -162,6 +177,41 @@ class TestSecrets(TempHomeCase):
         self.assertEqual([f["var"] for f in found if f["server"] == "d"],
                          ["GH_PAT"])  # _PATH vars are paths, not secrets
         self.assertNotIn("abcdef123456", json.dumps(found))  # never echoed whole
+
+    def test_nested_headers_are_flagged_and_exports_can_be_redacted(self):
+        raw = {
+            "headers": {"Authorization": "Bearer secret-value-12345",
+                        "X-Trace": "public-value"},
+            "env": {"API_TOKEN": "$env:SAFE_TOKEN"},
+        }
+        servers = [{"name": "remote", "agent": "codex", "origin": "config.toml",
+                    "raw": raw}]
+        found = config.secret_findings(servers)
+        self.assertEqual([f["var"] for f in found], ["headers.Authorization"])
+        redacted = config.redact_sensitive_config(raw)
+        self.assertEqual(redacted["headers"]["Authorization"], "<redacted>")
+        self.assertEqual(redacted["headers"]["X-Trace"], "public-value")
+        self.assertEqual(redacted["env"]["API_TOKEN"], "$env:SAFE_TOKEN")
+
+    def test_json_export_never_contains_nested_secret(self):
+        from mcp_dashboard import export_json
+
+        servers = [{
+            "name": "remote",
+            "agent": "codex",
+            "token": "internal-match-token",
+            "raw": {"headers": {
+                "Authorization": "Bearer secret-value-12345",
+                "X-Trace": "public-value",
+            }},
+        }]
+        destination = self.root / "snapshot.json"
+        export_json(servers, [], [], {}, destination)
+        exported = destination.read_text(encoding="utf-8")
+        self.assertNotIn("secret-value-12345", exported)
+        self.assertNotIn("internal-match-token", exported)
+        self.assertIn("<redacted>", exported)
+        self.assertIn("public-value", exported)
 
 
 class TestCodexToml(TempHomeCase):
@@ -231,6 +281,20 @@ class TestCodexToml(TempHomeCase):
             self.assertEqual(data, tomllib.loads(text))
         except ImportError:
             pass
+
+    def test_enable_quotes_server_names_with_dots(self):
+        self.write_codex('model = "gpt-5"\n')
+        ok, msg = config.codex_enable({"name": "vendor.server", "raw": {
+            "command": "uvx", "args": ["vendor-server"]}})
+        self.assertTrue(ok, msg)
+        text = (self.home / ".codex" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn('[mcp_servers."vendor.server"]', text)
+        data = load_toml(self.home / ".codex" / "config.toml")
+        self.assertEqual(data["mcp_servers"]["vendor.server"]["command"], "uvx")
+        from mcpdash.common import parse_toml_fallback
+        fallback = parse_toml_fallback(text)
+        self.assertEqual(
+            fallback["mcp_servers"]["vendor.server"]["command"], "uvx")
 
 
 class TestToggleAndProfiles(TempHomeCase):
@@ -523,6 +587,31 @@ class TestSkillFindings(unittest.TestCase):
         self.assertEqual(skills[1].get("shadowed_by"), "vault")
 
 
+class TestSkillDiscovery(unittest.TestCase):
+    def test_discovers_agents_and_codex_skill_roots(self):
+        from mcpdash import skills as skillmod
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vault = root / "vault"
+            home = root / "home"
+            for path, name in ((vault / ".agents" / "skills" / "vault-skill",
+                                "vault-skill"),
+                               (home / ".codex" / "skills" / "codex-skill",
+                                "codex-skill")):
+                path.mkdir(parents=True)
+                (path / "SKILL.md").write_text(
+                    f"---\nname: {name}\ndescription: test skill\n---\n",
+                    encoding="utf-8")
+            with mock.patch.object(skillmod, "VAULT_ROOT", vault), \
+                    mock.patch.object(skillmod.os, "getcwd", return_value=str(vault)), \
+                    mock.patch.object(Path, "home", classmethod(lambda cls: home)), \
+                    mock.patch.dict(os.environ, {"CODEX_HOME": str(home / ".codex")}):
+                found = skillmod.discover_skills()
+        names = {s["name"] for s in found}
+        self.assertIn("vault-skill", names)
+        self.assertIn("codex-skill", names)
+
+
 class TestRendering(unittest.TestCase):
     def test_demo_page_renders_all_views(self):
         from mcpdash import render
@@ -532,9 +621,21 @@ class TestRendering(unittest.TestCase):
         html = render.render_html(servers, skills, history, recs, [], [],
                                   {"when": "now", "host": "test", **extra})
         for marker in ("view-mcp", "view-advisor", "view-skills",
-                       "MCP Server Dashboard", "prefers-color-scheme"):
+                       "MCP Server Dashboard", "prefers-color-scheme",
+                       'role="tabpanel"', 'data-filter="servers"',
+                       "Hallmark · genre: modern-minimal", "oklch("):
             self.assertIn(marker, html)
+        self.assertNotIn("fonts.googleapis.com", html)
+        self.assertNotIn("−231 MB", html)  # review advice is not a saving claim
         self.assertNotIn("__TOKEN__", html)
+
+    def test_live_scripts_carry_the_control_nonce(self):
+        from mcpdash import render
+        html = render.render_html([], [], [], [], [], [],
+                                  {"when": "now", "host": "test"},
+                                  live=True, token="safe-nonce")
+        self.assertEqual(html.count('nonce="safe-nonce"'), 2)
+        self.assertIn("var MCP_TOKEN = 'safe-nonce';", html)
 
     def test_html_is_escaped(self):
         from mcpdash import render

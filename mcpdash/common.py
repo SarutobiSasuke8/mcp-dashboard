@@ -133,12 +133,19 @@ def parse_toml_fallback(text):
         m = re.match(r"^\[([^\]]+)\]$", line)
         if m:
             cur = data
-            for part in m.group(1).split("."):
-                cur = cur.setdefault(part.strip().strip('"'), {})
+            parts = re.findall(r'(?:^|\.)\s*(?:"((?:[^"\\]|\\.)*)"|([\w-]+))',
+                               m.group(1))
+            for basic, bare in parts:
+                part = (basic.replace('\\"', '"').replace("\\\\", "\\")
+                        if basic else bare)
+                cur = cur.setdefault(part, {})
             continue
-        m = re.match(r"^([\w.-]+)\s*=\s*(.+)$", line)
+        m = re.match(r'^(?:"((?:[^"\\]|\\.)*)"|([\w.-]+))\s*=\s*(.+)$',
+                     line)
         if m and cur is not None:
-            key, val = m.group(1), m.group(2).strip()
+            key = (m.group(1).replace('\\"', '"').replace("\\\\", "\\")
+                   if m.group(1) is not None else m.group(2))
+            val = m.group(3).strip()
             if val.startswith("["):
                 # Basic ("…", backslash-escaped) and literal ('…', verbatim)
                 # strings, in the order they appear.

@@ -34,7 +34,7 @@ whole design — the tool doesn't just report numbers, it renders a verdict.
 | `mcpdash/render.py` | The three-tab HTML dashboard |
 | `mcpdash/vaultout.py` | Markdown outputs for Obsidian vaults (registry note, usage report, task filing) |
 | `mcpdash/demo.py` | Sample data for reviewing the visual without a real scan |
-| `tests/test_dashboard.py` | 37 tests, standard library only |
+| `tests/test_dashboard.py` | 46 tests, standard library only |
 | `Register-MCPDashboardScan.ps1` | Windows scheduled-task registration |
 | `mcp-provenance.json` | Your provenance labels (committed — no secrets) |
 | `mcp-profiles.json` | Your named server sets (committed — no secrets) |
@@ -109,7 +109,8 @@ bucketing so the windows don't skew by the local offset.
 ## Provenance
 
 Every server gets a badge, so the toolbox distinguishes what you built from
-what you installed:
+what you installed. Server identity includes config origin for local/project
+scopes, so the same name in two repositories cannot collide:
 
 | Label | Meaning |
 | --- | --- |
@@ -163,7 +164,7 @@ python mcp_dashboard.py --serve      # http://127.0.0.1:7817/?t=<token>
 - **Profiles** — named sets in `mcp-profiles.json`. Applying one enables its
   members and disables everything else, across all agents at once.
 
-Because this endpoint edits real config, it is defended three ways:
+Because this endpoint edits real config, it is defended in layers:
 
 1. **Loopback only** — the socket binds to `127.0.0.1`.
 2. **Host-header check** — a request whose `Host` isn't loopback is rejected,
@@ -173,8 +174,11 @@ Because this endpoint edits real config, it is defended three ways:
    attach a custom header without triggering a CORS preflight, which this
    server never answers with an allow — so the token can't be exfiltrated
    that way either.
+4. **Browser policy** — live HTML gets a nonce-based Content Security Policy,
+   `no-store`, `no-referrer`, frame denial, and MIME sniffing protection. The
+   dashboard loads no remote fonts, scripts, or styles.
 
-Without all three, any website open in the browser could have silently
+Without the first three controls, any website open in the browser could have silently
 reconfigured the agent stack. Changes take effect for **new** sessions;
 already-running sessions keep their processes until restarted.
 
@@ -195,12 +199,18 @@ already-running sessions keep their processes until restarted.
 5. **Works with or without a vault.** The vault-output path (`vaultout.py`)
    is additive — a clone with no vault nearby still runs standalone, writing
    to `output/`.
+6. **Progressive workbench UI.** The three views keep their information
+   architecture, while filters, keyboard tab navigation, mobile card layouts,
+   and a persistent theme control make large toolboxes easier to operate.
+7. **Exports are redacted recursively.** Credential-like values are removed
+   from nested environment, header, list, and vendor-specific config blocks —
+   not only from the top-level `env` mapping.
 
 ---
 
 ## Verification
 
-`python -m unittest discover -s tests` runs 37 tests with no third-party
+`python -m unittest discover -s tests` runs 46 tests with no third-party
 dependencies, against a throwaway `HOME` so no real config is ever touched.
 Coverage: config discovery across agents, provenance classification, the
 secrets audit's redaction, Codex TOML removal and restoration, disable/enable
@@ -208,7 +218,9 @@ round-trips and their backups, profile application, process matching
 (including the shells-and-editors exclusions), the MCP handshake probe
 against a real stdio server plus its failure paths, usage windows and
 timezone handling, the transcript parse cache, verdicts and recommendations,
-skill shadowing, HTML escaping, and the note/task writers.
+skill shadowing and multi-root discovery, responsive HTML structure, nonce
+placement, HTML escaping, recursive secret redaction, project-key uniqueness,
+and the note/task writers.
 
 Four defects were caught this way during development and fixed: `owner/name`
 packages were labelled `unlabeled` instead of `community`; the seven-day

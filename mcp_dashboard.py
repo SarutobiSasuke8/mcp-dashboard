@@ -112,12 +112,9 @@ def build_page(servers, skill_list, skill_usage, history, meta, live=False,
 
 
 def export_json(servers, skill_list, recs, totals_d, path):
-    """Machine-readable snapshot for other tools. Config env values are
-    replaced with their variable names only — never write secrets out."""
+    """Machine-readable snapshot for other tools, with configs redacted."""
     def clean(s):
-        raw = dict(s.get("raw") or {})
-        if raw.get("env"):
-            raw["env"] = {k: "<redacted>" for k in raw["env"]}
+        raw = config.redact_sensitive_config(s.get("raw") or {})
         return {k: v for k, v in
                 {**s, "raw": raw}.items() if k != "token"}
 
@@ -139,12 +136,11 @@ def export_json(servers, skill_list, recs, totals_d, path):
 def serve(args):
     """Local control surface.
 
-    This endpoint edits real agent config, so it is defended three ways: it
-    binds to loopback only, it rejects requests whose Host header is not
-    loopback (which blocks DNS rebinding), and every request must carry a
-    per-run token — in the query string for the page, in a custom header for
-    the mutating calls, which a cross-origin page cannot send without a CORS
-    preflight this server never grants."""
+    This endpoint edits real agent config, so it binds to loopback, rejects
+    non-loopback Host headers, requires a per-run token, and applies strict
+    browser response headers. Cross-origin pages cannot attach the custom
+    mutation header without a CORS preflight, which this server never grants.
+    """
     from http.server import HTTPServer, BaseHTTPRequestHandler
 
     token = secrets.token_urlsafe(16)
@@ -159,6 +155,17 @@ def serve(args):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            if ctype.startswith("text/html"):
+                self.send_header(
+                    "Content-Security-Policy",
+                    "default-src 'none'; base-uri 'none'; form-action 'none'; "
+                    "frame-ancestors 'none'; img-src 'self' data:; "
+                    "font-src 'self'; style-src 'unsafe-inline'; "
+                    f"script-src 'nonce-{token}'; connect-src 'self'")
             self.end_headers()
             self.wfile.write(data)
 
@@ -238,9 +245,17 @@ def serve(args):
                 else:
                     self._send(404, "{}", "application/json")
                     return
+            except (ValueError, json.JSONDecodeError) as exc:
+                self._send(400, json.dumps({"ok": False,
+                                            "message": f"invalid request: {exc}"}),
+                           "application/json")
+                return
             except Exception as exc:  # pragma: no cover - defensive
-                ok, msg = False, str(exc)
-            self._send(200, json.dumps({"ok": ok, "message": msg}),
+                self._send(500, json.dumps({"ok": False, "message": str(exc)}),
+                           "application/json")
+                return
+            self._send(200 if ok else 400,
+                       json.dumps({"ok": ok, "message": msg}),
                        "application/json")
 
     httpd = HTTPServer(("127.0.0.1", args.port), Handler)
@@ -291,8 +306,8 @@ def main():
                     help="apply a profile from mcp-profiles.json and exit")
     ap.add_argument("--list-profiles", action="store_true")
     ap.add_argument("--json", type=Path, metavar="PATH", dest="json_path",
-                    help="also write a machine-readable snapshot (env values "
-                         "redacted) for other tools to consume")
+                    help="also write a machine-readable snapshot (nested "
+                         "credential values redacted) for other tools")
     ap.add_argument("--open", action="store_true", help="open in a browser")
     args = ap.parse_args()
 

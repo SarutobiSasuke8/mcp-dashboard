@@ -25,7 +25,17 @@ def update_registry(servers, now_iso):
     registry = load_json(REGISTRY_PATH) or {}
     entries = registry.get("servers", {})
     for s in servers:
-        e = entries.get(s["key"], {})
+        e = entries.get(s["key"])
+        if e is None:
+            # Keys created before project origins were included can collide.
+            # Migrate an exact identity match so first-seen and peak RAM are
+            # retained without leaving a duplicate stale registry row.
+            old_key = next((key for key, value in entries.items()
+                            if value.get("name") == s["name"]
+                            and value.get("agent") == s["agent"]
+                            and value.get("scope") == s["scope"]
+                            and value.get("origin", "") == s["origin"]), None)
+            e = entries.pop(old_key) if old_key else {}
         e.update({
             "name": s["name"], "agent": s["agent"], "scope": s["scope"],
             "origin": s["origin"], "transport": s["transport"],

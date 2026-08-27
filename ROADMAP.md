@@ -13,8 +13,13 @@ for anything here — or anything missing from here.
 - [x] Verdicts, ranked recommendations, and reclaimable-RAM estimates
 - [x] Working on/off toggles and profiles behind an authenticated loopback server
 - [x] Timestamped backup before **every** config edit, CLI paths included
-- [x] Skills directory with usage counts and shadowing warnings
-- [x] Test suite (38 tests, stdlib only) with hard sandbox isolation —
+- [x] Skills directory across Claude, `.agents`, `.codex`, and plugin roots,
+      with usage counts and shadowing warnings
+- [x] Responsive dashboard redesign with filters, keyboard tabs, persistent
+      automatic/light/dark theme, and mobile card views
+- [x] Recursive config-secret redaction plus nonce-based live-page browser
+      hardening headers
+- [x] Test suite (46 tests, stdlib only) with hard sandbox isolation —
       `Path.home` patched, agent CLIs stubbed, so tests can never touch
       real config
 - [x] CI across Ubuntu / Windows / macOS, Python 3.10 and 3.13

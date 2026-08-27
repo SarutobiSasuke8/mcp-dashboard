@@ -8,8 +8,8 @@ Gemini CLI, and Cursor** — what each server costs in RAM, CPU, context
 tokens, and startup time, weighed against how often you actually call it,
 with working on/off switches and a skills directory.
 
-**Zero dependencies.** Python 3.10+ standard library only; `psutil` is an
-optional extra for live CPU sampling. Clone and run.
+**Zero dependencies and no remote UI assets.** Python 3.10+ standard library
+only; `psutil` is an optional extra for live CPU sampling. Clone and run.
 
 ![MCP Server Dashboard](docs/screenshot.png)
 
@@ -56,7 +56,7 @@ python mcp_dashboard.py --no-cli        # skip `claude mcp list` (faster)
 python mcp_dashboard.py --demo          # sample data, to preview the visual
 ```
 
-Tests: `python -m unittest discover -s tests` (standard library only).
+Tests: `python -m unittest discover -s tests` (standard library only; 46 tests).
 
 Windows: use `py mcp_dashboard.py ...` if `python` isn't on your PATH.
 Optional: `pip install psutil` for live CPU sampling (and any CPU reading at
@@ -68,16 +68,21 @@ unit-tested in CI but have had less real-machine mileage — issues welcome.
 
 ## Views
 
-- **Servers** — tiles, RAM-over-time chart, and a table per server: status,
+- **Servers** — filterable tiles, RAM-over-time chart, and a table per server: status,
   verdict, calls in 30 days, context cost, process count, CPU, RAM with
-  sparkline, and an on/off switch. Local stdio and remote servers are listed
-  separately because only the former cost RAM.
+  sparkline, and an on/off switch. Tables collapse into labelled cards on
+  smaller screens. Local stdio and remote servers are listed separately
+  because only the former cost RAM.
 - **Advisor** — ranked recommendations with estimated savings and one-click
   switch-off, profile buttons, most-used and heaviest bar charts, and any
   plaintext credentials found in config.
-- **Skills** — every skill from the vault, project, user, synced, and plugin
-  paths, with 30-day usage, `locked` markers from `skills-lock.json`, and
-  name-collision warnings showing which copy wins.
+- **Skills** — every skill from Claude, `.agents`, `.codex`, vault, project,
+  user, synced, and plugin paths, with filtering, 30-day usage, `locked`
+  markers from `skills-lock.json`, and name-collision warnings showing which
+  copy wins.
+
+The header theme control cycles automatic, light, and dark modes. The chosen
+view and theme survive live-control reloads.
 
 ## How it measures
 
@@ -122,12 +127,12 @@ with a timestamped backup as fallback) and stashes it in
 a named set and disable everything else, across all agents at once. Changes
 apply to **new** sessions.
 
-Because this endpoint edits real config, it is defended three ways: it binds
-to loopback only, it rejects requests whose `Host` is not loopback (blocking
-DNS rebinding), and every request carries a per-run token — in the query
-string for the page, in an `X-MCP-Token` header for anything that mutates,
-which a cross-origin page cannot send without a CORS preflight this server
-never grants. Open the URL the command prints; the token is in it.
+Because this endpoint edits real config, it binds to loopback only, rejects a
+non-loopback `Host` (blocking DNS rebinding), and requires a per-run token —
+in the query string for the page and an `X-MCP-Token` header for mutations.
+The live response also sends a nonce-based Content Security Policy, disables
+framing and caching, and suppresses referrers. Open the URL the command prints;
+the token is in it.
 
 ## Scheduling
 
@@ -162,9 +167,10 @@ never grants. Open the URL the command prints; the token is in it.
 
 Every config edit — including ones routed through the `claude`/`codex`
 CLIs — takes a timestamped backup of the file first, and disabled servers
-are stashed in full so switching them back on is lossless. The test suite
-runs inside a hard sandbox (`Path.home` patched, agent CLIs stubbed) and
-can never touch your real config.
+are stashed in full so switching them back on is lossless. Machine-readable
+exports recursively redact credential-like values in environment, header,
+and vendor-specific config blocks. The test suite runs inside a hard sandbox
+(`Path.home` patched, agent CLIs stubbed) and can never touch your real config.
 
 ## License
 

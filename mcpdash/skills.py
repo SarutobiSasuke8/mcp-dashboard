@@ -52,16 +52,37 @@ def discover_skills():
             info["source"] = source
             skills.append(info)
 
-    scan_root(VAULT_ROOT / ".claude" / "skills", "vault")
+    # Project-local skills have precedence over user and plugin copies. Scan
+    # the conventions used by both Claude Code and Codex-compatible agents.
+    for rel, source in ((Path(".agents/skills"), "vault:agents"),
+                        (Path(".codex/skills"), "vault:codex"),
+                        (Path(".claude/skills"), "vault:claude")):
+        scan_root(VAULT_ROOT / rel, source)
     cwd = Path(os.getcwd())
     if cwd != VAULT_ROOT:
-        scan_root(cwd / ".claude" / "skills", "project")
+        for rel, source in ((Path(".agents/skills"), "project:agents"),
+                            (Path(".codex/skills"), "project:codex"),
+                            (Path(".claude/skills"), "project:claude")):
+            scan_root(cwd / rel, source)
     scan_root(Path.home() / ".claude" / "skills" / "synced", "synced")
-    scan_root(Path.home() / ".claude" / "skills", "user")
+    scan_root(Path.home() / ".agents" / "skills", "user:agents")
+    scan_root(Path.home() / ".codex" / "skills", "user:codex")
+    scan_root(Path.home() / ".claude" / "skills", "user:claude")
     plugins_root = Path.home() / ".claude" / "plugins"
     if plugins_root.is_dir():
         for plugdir in sorted(p for p in plugins_root.iterdir() if p.is_dir()):
             scan_root(plugdir / "skills", f"plugin:{plugdir.name}")
+
+    codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    scan_root(codex_home / "skills", "user:codex-home")
+    codex_plugins = codex_home / "plugins"
+    if codex_plugins.is_dir():
+        # Plugin caches nest skill roots at varying depths. ``seen_paths``
+        # keeps overlapping roots from reporting the same skill twice.
+        for skill_root in sorted(p for p in codex_plugins.rglob("skills")
+                                 if p.is_dir()):
+            package = skill_root.parent.name or "codex"
+            scan_root(skill_root, f"plugin:{package}")
 
     lock = load_json(VAULT_ROOT / "skills-lock.json") or \
         load_json(Path(os.getcwd()) / "skills-lock.json") or {}

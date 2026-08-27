@@ -11,8 +11,8 @@ import re
 from pathlib import Path
 
 from .common import (DISABLED_PATH, GENERIC_COMMANDS, PROFILES_PATH,
-                     PROVENANCE_PATH, backup_file, load_json, load_toml,
-                     run_cli, save_json)
+                     PROVENANCE_PATH, atomic_write, backup_file, load_json,
+                     load_toml, run_cli, save_json)
 
 OFFICIAL_PREFIXES = ("@modelcontextprotocol/",)
 VENDOR_PREFIXES = (
@@ -23,7 +23,10 @@ VENDOR_PREFIXES = (
 SCRIPT_EXTS = (".py", ".js", ".mjs", ".cjs", ".ts")
 # \b keeps _PAT (personal access token) from matching inside _PATH.
 SECRET_KEY_RE = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|"
-                           r"_PAT\b|APIKEY|ACCESS)", re.I)
+                           r"_PAT\b|APIKEY|ACCESS|AUTH(?:ORIZATION)?|BEARER|"
+                           r"COOKIE|PRIVATE)", re.I)
+SECRET_VALUE_RE = re.compile(
+    r"^(?:sk-|ghp_|github_pat_|xox[baprs]-|AIza|glpat-|Bearer\s+)", re.I)
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +66,18 @@ def match_token(cfg):
         if not a.startswith("-"):
             return a
     return cfg.get("command") or None
+
+
+def server_key(agent, scope, name, origin):
+    """Stable identity for one configured server.
+
+    User-scoped names are unique per agent. Project and local scopes are not:
+    two repositories can both define ``filesystem``. Include their origin so
+    toggles, history, and disabled stashes never target the wrong copy.
+    """
+    if scope == "user":
+        return f"{agent}::{scope}::{name}"
+    return f"{agent}::{scope}::{origin}::{name}"
 
 
 def detect_provenance(entry, overrides):
@@ -184,28 +199,75 @@ def discover_servers():
                  if not k.startswith("_")}
     for s in servers:
         s["provenance"], s["prov_source"] = detect_provenance(s, overrides)
-        s["key"] = f"{s['agent']}::{s['scope']}::{s['name']}"
+        s["key"] = server_key(s["agent"], s["scope"], s["name"], s["origin"])
         s["note"] = (overrides.get(s["name"], {}) or {}).get("note", "") \
             if isinstance(overrides.get(s["name"]), dict) else ""
     return servers
 
 
+def _is_env_reference(value):
+    text = value.strip()
+    return bool(re.match(r"^(?:\$\{?[\w.-]+\}?|\$env:[\w.-]+|%[\w.-]+%)$",
+                         text, re.I))
+
+
+def _looks_secret(key, value):
+    return (isinstance(value, str) and len(value) >= 8
+            and not _is_env_reference(value)
+            and (bool(SECRET_KEY_RE.search(str(key)))
+                 or bool(SECRET_VALUE_RE.match(value.strip()))))
+
+
+def _walk_config(value, path=()):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_path = path + (str(key),)
+            if _looks_secret(key, child):
+                yield child_path, child
+            else:
+                yield from _walk_config(child, child_path)
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            child_path = path + (str(index),)
+            if _looks_secret("", child):
+                yield child_path, child
+            else:
+                yield from _walk_config(child, child_path)
+
+
+def redact_sensitive_config(value):
+    """Return a JSON-safe copy with credential-like values removed.
+
+    MCP configs can carry secrets in ``env``, HTTP ``headers``, and nested
+    vendor-specific blocks. Redacting only ``env`` makes ``--json`` exports
+    look safe while still leaking common Authorization headers.
+    """
+    if isinstance(value, dict):
+        out = {}
+        for key, child in value.items():
+            if _looks_secret(key, child):
+                out[key] = "<redacted>"
+            else:
+                out[key] = redact_sensitive_config(child)
+        return out
+    if isinstance(value, list):
+        return [redact_sensitive_config(child) for child in value]
+    if _looks_secret("", value):
+        return "<redacted>"
+    return value
+
+
 def secret_findings(servers):
-    """Flag plaintext-looking credentials in server env blocks. Values are
-    never returned in full — only a short redacted preview."""
+    """Flag plaintext-looking credentials anywhere in server config.
+
+    Values are never returned in full — only a short redacted preview.
+    """
     out = []
     for s in servers:
-        for k, v in ((s.get("raw") or {}).get("env") or {}).items():
-            if not isinstance(v, str) or len(v) < 8:
-                continue
-            looks_secret = bool(SECRET_KEY_RE.search(k)) or re.match(
-                r"^(sk-|ghp_|github_pat_|xoxb-|AIza|glpat-)", v)
-            if not looks_secret:
-                continue
-            if re.match(r"^\$\{?[\w]+\}?$", v.strip()) or v.startswith("%"):
-                continue  # already an env-var reference
+        for path, v in _walk_config(s.get("raw") or {}):
+            label = path[-1] if path[:1] == ("env",) else ".".join(path)
             out.append({"server": s["name"], "agent": s["agent"],
-                        "origin": s["origin"], "var": k,
+                        "origin": s["origin"], "var": label,
                         "preview": v[:3] + "…" + v[-2:] if len(v) > 8 else "…"})
     return out
 
@@ -296,7 +358,7 @@ def codex_disable(e):
     new = pat.sub("", text)
     if new == text:
         return False, "server block not found in config.toml"
-    path.write_text(new, encoding="utf-8")
+    atomic_write(path, new)
     return True, "removed by editing config.toml (backup made)"
 
 
@@ -312,6 +374,14 @@ def _toml_str(v):
                   .replace("\n", "\\n") + '"'
 
 
+def _toml_key(v):
+    """Serialise a TOML key, quoting names that contain dots or spaces."""
+    v = str(v)
+    if re.fullmatch(r"[A-Za-z0-9_-]+", v):
+        return v
+    return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def codex_enable(e):
     cfg = e["raw"] or {}
     cmd = ["codex", "mcp", "add", e["name"]]
@@ -324,7 +394,8 @@ def codex_enable(e):
         return True, "restored via codex CLI"
     path = codex_toml_path()
     backup_file(path)
-    lines = [f'\n[mcp_servers.{e["name"]}]']
+    table_name = _toml_key(e["name"])
+    lines = [f'[mcp_servers.{table_name}]']
     if cfg.get("command"):
         lines.append(f'command = {_toml_str(cfg["command"])}')
     if cfg.get("args"):
@@ -332,11 +403,15 @@ def codex_enable(e):
     if cfg.get("url"):
         lines.append(f'url = {_toml_str(cfg["url"])}')
     if cfg.get("env"):
-        lines.append(f'\n[mcp_servers.{e["name"]}.env]')
+        lines.append(f'\n[mcp_servers.{table_name}.env]')
         for k, v in cfg["env"].items():
-            lines.append(f'{k} = {_toml_str(v)}')
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write("\n".join(lines) + "\n")
+            lines.append(f'{_toml_key(k)} = {_toml_str(v)}')
+    try:
+        current = path.read_text(encoding="utf-8")
+    except OSError:
+        current = ""
+    prefix = current.rstrip() + ("\n\n" if current.strip() else "")
+    atomic_write(path, prefix + "\n".join(lines) + "\n")
     return True, "restored by appending to config.toml (backup made)"
 
 
@@ -368,11 +443,17 @@ def set_enabled(entry, enabled):
     key = entry["key"]
     keep = {k: entry[k] for k in ("name", "agent", "scope", "origin", "raw")}
     if enabled:
-        stashed = stash.get(key) or keep
+        legacy_key = next((k for k, value in stash.items()
+                           if all(value.get(field) == entry.get(field)
+                                  for field in ("name", "agent", "scope", "origin"))),
+                          None)
+        stashed = stash.get(key) or stash.get(legacy_key) or keep
         stashed = {**stashed, "key": key}
         ok, msg = ENABLERS[entry["agent"]](stashed)
         if ok:
             stash.pop(key, None)
+            if legacy_key:
+                stash.pop(legacy_key, None)
             save_json(DISABLED_PATH, stash)
         return ok, msg
     ok, msg = DISABLERS[entry["agent"]](entry)

@@ -2,166 +2,289 @@
 
 from .common import esc, fmt_mb, fmt_tokens
 
-CSS = """
+CSS = """/* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V4 */
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench · designed-as-app */
 :root {
-  --bg:#F4F6F8; --surface:#FFFFFF; --ink:#1B2229; --muted:#5C6873;
-  --line:#DDE3E8; --accent:#2F6B8F; --accent-soft:#D8E5ED;
-  --cpu:#6B5D95; --cpu-soft:#E4DFF0;
-  --ok:#2E7D4F; --ok-soft:#DEEEE4; --bad:#B3413A; --bad-soft:#F3E0DE;
-  --warn:#A8752C; --warn-soft:#F1E7D6; --info:#3D5A80; --info-soft:#DEE5EF;
-  --off:#5C6873; --off-soft:#E4E8EC;
+  color-scheme:light;
+  --font-display:"Bahnschrift","Aptos Display","Arial Narrow","Segoe UI",sans-serif;
+  --font-body:"Segoe UI Variable Text","Aptos","Segoe UI",sans-serif;
+  --font-mono:"Cascadia Code","SFMono-Regular","Liberation Mono",monospace;
+  --bg:oklch(97.2% 0.007 240); --surface:oklch(99.1% 0.004 240);
+  --surface-raised:oklch(100% 0.002 240); --ink:oklch(23% 0.018 240);
+  --muted:oklch(47% 0.018 240); --line:oklch(87% 0.012 240);
+  --line-strong:oklch(75% 0.018 240); --accent:oklch(53% 0.14 238);
+  --accent-ink:oklch(98% 0.006 240); --accent-soft:oklch(92% 0.035 238);
+  --cpu:oklch(55% 0.10 292); --cpu-soft:oklch(92% 0.025 292);
+  --ok:oklch(47% 0.12 155); --ok-soft:oklch(92% 0.035 155);
+  --bad:oklch(48% 0.17 28); --bad-soft:oklch(93% 0.035 28);
+  --warn:oklch(49% 0.11 75); --warn-soft:oklch(93% 0.04 75);
+  --info:oklch(46% 0.09 250); --info-soft:oklch(92% 0.03 250);
+  --off:oklch(47% 0.018 240); --off-soft:oklch(91% 0.012 240);
+  --shadow:0 1px 2px oklch(20% 0.015 240 / 0.06);
+  --space-3xs:0.125rem; --space-2xs:0.25rem; --space-xs:0.5rem;
+  --space-sm:0.75rem; --space-md:1rem; --space-lg:1.5rem;
+  --space-xl:2.5rem; --space-2xl:4rem; --space-3xl:6rem;
+  --text-xs:0.75rem; --text-sm:0.875rem; --text-base:1rem;
+  --text-md:1.25rem; --text-lg:1.5625rem; --text-xl:1.953rem;
+  --radius-sm:0.375rem; --radius-md:0.625rem; --radius-pill:99rem;
+  --ease-out:cubic-bezier(0.16,1,0.3,1); --ease-in:cubic-bezier(0.7,0,0.84,0);
+  --ease-in-out:cubic-bezier(0.65,0,0.35,1); --dur-micro:120ms; --dur-short:220ms;
 }
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme:dark) {
   :root:not([data-theme="light"]) {
-    --bg:#14181D; --surface:#1C222A; --ink:#E8ECEF; --muted:#93A0AC;
-    --line:#2B333D; --accent:#6FA3C4; --accent-soft:#24384A;
-    --cpu:#A395CC; --cpu-soft:#2E2941;
-    --ok:#63B888; --ok-soft:#1E3529; --bad:#D98A84; --bad-soft:#3D2523;
-    --warn:#CDA05F; --warn-soft:#3A2F1D; --info:#8FA9C9; --info-soft:#252F3E;
-    --off:#93A0AC; --off-soft:#262D36;
+    color-scheme:dark; --bg:oklch(16% 0.012 240); --surface:oklch(20% 0.015 240);
+    --surface-raised:oklch(23% 0.016 240); --ink:oklch(94% 0.008 240);
+    --muted:oklch(72% 0.018 240); --line:oklch(30% 0.018 240);
+    --line-strong:oklch(43% 0.022 240); --accent:oklch(72% 0.11 238);
+    --accent-ink:oklch(16% 0.02 240); --accent-soft:oklch(27% 0.045 238);
+    --cpu:oklch(73% 0.09 292); --cpu-soft:oklch(28% 0.035 292);
+    --ok:oklch(74% 0.11 155); --ok-soft:oklch(27% 0.045 155);
+    --bad:oklch(72% 0.14 28); --bad-soft:oklch(28% 0.05 28);
+    --warn:oklch(76% 0.10 75); --warn-soft:oklch(29% 0.045 75);
+    --info:oklch(74% 0.08 250); --info-soft:oklch(28% 0.035 250);
+    --off:oklch(70% 0.018 240); --off-soft:oklch(27% 0.015 240);
+    --shadow:0 1px 2px oklch(5% 0.01 240 / 0.35);
   }
 }
 :root[data-theme="dark"] {
-  --bg:#14181D; --surface:#1C222A; --ink:#E8ECEF; --muted:#93A0AC;
-  --line:#2B333D; --accent:#6FA3C4; --accent-soft:#24384A;
-  --cpu:#A395CC; --cpu-soft:#2E2941;
-  --ok:#63B888; --ok-soft:#1E3529; --bad:#D98A84; --bad-soft:#3D2523;
-  --warn:#CDA05F; --warn-soft:#3A2F1D; --info:#8FA9C9; --info-soft:#252F3E;
-  --off:#93A0AC; --off-soft:#262D36;
+  color-scheme:dark; --bg:oklch(16% 0.012 240); --surface:oklch(20% 0.015 240);
+  --surface-raised:oklch(23% 0.016 240); --ink:oklch(94% 0.008 240);
+  --muted:oklch(72% 0.018 240); --line:oklch(30% 0.018 240);
+  --line-strong:oklch(43% 0.022 240); --accent:oklch(72% 0.11 238);
+  --accent-ink:oklch(16% 0.02 240); --accent-soft:oklch(27% 0.045 238);
+  --cpu:oklch(73% 0.09 292); --cpu-soft:oklch(28% 0.035 292);
+  --ok:oklch(74% 0.11 155); --ok-soft:oklch(27% 0.045 155);
+  --bad:oklch(72% 0.14 28); --bad-soft:oklch(28% 0.05 28);
+  --warn:oklch(76% 0.10 75); --warn-soft:oklch(29% 0.045 75);
+  --info:oklch(74% 0.08 250); --info-soft:oklch(28% 0.035 250);
+  --off:oklch(70% 0.018 240); --off-soft:oklch(27% 0.015 240);
+  --shadow:0 1px 2px oklch(5% 0.01 240 / 0.35);
 }
-* { box-sizing:border-box; margin:0; }
-html { background:var(--bg); }
-body { background:var(--bg); color:var(--ink);
-  font:15px/1.5 "IBM Plex Sans","Segoe UI",system-ui,sans-serif;
-  padding:32px 20px 64px; }
-main { max-width:1040px; margin:0 auto; display:flex; flex-direction:column; gap:24px; }
-header { display:flex; align-items:flex-end; justify-content:space-between;
-  gap:16px; flex-wrap:wrap; }
-header h1 { font-size:22px; font-weight:600; letter-spacing:-0.01em; }
-header .sub { color:var(--muted); font-size:13px; margin-top:4px;
-  font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace; }
-.tabs { display:flex; gap:4px; background:var(--surface);
-  border:1px solid var(--line); border-radius:6px; padding:3px; }
-.tabs button { font:inherit; font-size:13.5px; font-weight:500; border:0;
-  background:transparent; color:var(--muted); padding:6px 16px;
-  border-radius:4px; cursor:pointer; }
+* { box-sizing:border-box; }
+html, body { margin:0; overflow-x:clip; background:var(--bg); }
+body { min-width:0; color:var(--ink); font:var(--text-base)/1.55 var(--font-body);
+  padding-block:var(--space-lg) max(var(--space-2xl),env(safe-area-inset-bottom));
+  padding-inline:max(var(--space-md),env(safe-area-inset-left)); }
+button, input { font:inherit; }
+main { width:min(100%,74rem); margin-inline:auto; display:flex; flex-direction:column;
+  gap:var(--space-xl); min-width:0; }
+header { display:grid; gap:var(--space-md); align-items:end; }
+.brandline { display:flex; gap:var(--space-sm); align-items:center; min-width:0; }
+.brandmark { display:grid; place-items:center; width:2.25rem; height:2.25rem; flex:none;
+  border-radius:var(--radius-sm); background:var(--ink); color:var(--bg);
+  font:600 var(--text-xs)/1 var(--font-mono); letter-spacing:-0.04em; }
+header h1 { margin:0; min-width:0; overflow-wrap:anywhere; font:700 var(--text-lg)/1.15 var(--font-display);
+  letter-spacing:-0.035em; }
+header .sub { color:var(--muted); font:var(--text-xs)/1.5 var(--font-mono); margin-top:var(--space-2xs); }
+.header-actions { display:flex; gap:var(--space-xs); align-items:center; flex-wrap:wrap; min-width:0; }
+.tabs { order:2; width:100%; display:flex; gap:var(--space-2xs); padding:var(--space-2xs);
+  align-items:center; overflow-x:auto; background:var(--surface); border:1px solid var(--line);
+  border-radius:var(--radius-md); box-shadow:var(--shadow); }
+.tabs button, .theme-toggle { min-height:2.75rem; border:0; white-space:nowrap; cursor:pointer;
+  border-radius:var(--radius-sm); color:var(--muted); background:transparent;
+  font-size:var(--text-sm); font-weight:650; }
+.tabs button { flex:1; padding-inline:var(--space-md); }
 .tabs button[aria-selected="true"] { background:var(--accent-soft); color:var(--accent); }
-.tabs button:focus-visible, .switch:focus-visible, .btn:focus-visible {
-  outline:2px solid var(--accent); outline-offset:1px; }
-.tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; }
-.tile { background:var(--surface); border:1px solid var(--line);
-  border-radius:6px; padding:14px 16px; }
-.tile .label { font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); }
-.tile .value { font-size:25px; font-weight:600; margin-top:2px; font-variant-numeric:tabular-nums; }
-.tile .value small { font-size:13px; font-weight:500; color:var(--muted); }
+.theme-toggle { order:1; margin-inline-start:auto; padding-inline:var(--space-sm);
+  border:1px solid var(--line); background:var(--surface); box-shadow:var(--shadow); }
+:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.status-message { padding:var(--space-sm) var(--space-md); border:1px solid var(--bad);
+  border-radius:var(--radius-sm); color:var(--bad); background:var(--bad-soft); }
+.status-message:empty { display:none; }
+.tiles { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-sm); }
+.tile { min-width:0; padding:var(--space-md); background:var(--surface);
+  border:1px solid var(--line); border-radius:var(--radius-md); box-shadow:var(--shadow); }
+.tile .label { color:var(--muted); font-size:var(--text-xs); font-weight:650;
+  letter-spacing:0.07em; text-transform:uppercase; }
+.tile .value { min-width:0; margin-top:var(--space-2xs); overflow-wrap:anywhere;
+  font:700 var(--text-xl)/1.15 var(--font-display); letter-spacing:-0.035em;
+  font-variant-numeric:tabular-nums; }
+.tile .value small { color:var(--muted); font:600 var(--text-xs)/1.2 var(--font-body); letter-spacing:0; }
 .tile.hot .value { color:var(--accent); }
 .tile.alert .value { color:var(--bad); }
-section { margin-top:24px; }
+section { margin-top:var(--space-xl); }
 section:first-child { margin-top:0; }
-section h2 { font-size:13px; text-transform:uppercase; letter-spacing:0.08em;
-  color:var(--muted); font-weight:600; margin-bottom:10px; }
-section h2 .hint { text-transform:none; letter-spacing:0; font-weight:400; }
-.card { background:var(--surface); border:1px solid var(--line);
-  border-radius:6px; padding:16px; }
-.tablewrap { background:var(--surface); border:1px solid var(--line);
-  border-radius:6px; overflow-x:auto; }
-table { border-collapse:collapse; width:100%; min-width:760px; }
-th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:0.07em;
-  color:var(--muted); font-weight:600; padding:10px 14px; border-bottom:1px solid var(--line); }
-td { padding:12px 14px; border-bottom:1px solid var(--line); vertical-align:middle; font-size:14px; }
-tr:last-child td { border-bottom:none; }
-tr.disabledrow td { opacity:0.55; }
-td.name { font-weight:500; }
-td.desc { color:var(--muted); font-size:13px; max-width:460px; }
-.chiprow { margin-top:4px; display:flex; gap:4px; flex-wrap:wrap; align-items:center; }
-.cmd { font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;
-  font-size:11.5px; color:var(--muted); margin-top:3px; max-width:320px;
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.chip { display:inline-block; font-size:11px; padding:1px 7px; border-radius:4px;
-  border:1px solid var(--line); color:var(--muted); background:var(--bg); }
-.prov, .prov-self { display:inline-block; font-size:11px; font-weight:500;
-  padding:1px 8px; border-radius:99px; margin-left:4px; vertical-align:2px; }
-.prov { border:1px solid var(--line); color:var(--muted); }
-.prov-self { background:var(--accent); color:var(--surface); }
+section h2 { min-width:0; margin:0 0 var(--space-sm); overflow-wrap:anywhere;
+  color:var(--ink); font:700 var(--text-base)/1.25 var(--font-display); letter-spacing:-0.015em; }
+section h2 .hint { color:var(--muted); font:400 var(--text-sm)/1.4 var(--font-body); }
+.card { min-width:0; padding:var(--space-md); background:var(--surface);
+  border:1px solid var(--line); border-radius:var(--radius-md); box-shadow:var(--shadow); }
+.toolbar { display:flex; gap:var(--space-sm); align-items:end; justify-content:space-between;
+  margin-block:var(--space-lg) var(--space-md); flex-wrap:wrap; }
+.search { display:grid; gap:var(--space-2xs); width:min(100%,24rem); color:var(--muted);
+  font-size:var(--text-xs); font-weight:650; }
+.search input { width:100%; min-height:2.75rem; padding-inline:var(--space-sm);
+  border:1px solid var(--line-strong); outline:2px solid transparent; outline-offset:1px;
+  border-radius:var(--radius-sm); color:var(--ink); background:var(--surface); }
+.search input:focus-visible { outline-color:var(--accent); border-color:var(--line-strong); }
+.search input:disabled { cursor:not-allowed; opacity:0.55; background:var(--off-soft); }
+.filter-summary { min-height:1.25rem; color:var(--muted); font-size:var(--text-sm); }
+.tablewrap { min-width:0; background:transparent; }
+table, thead, tbody, tr, th, td { display:block; }
+table { width:100%; border-collapse:collapse; }
+thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+tbody { display:grid; gap:var(--space-sm); }
+tr { padding:var(--space-xs) var(--space-sm); background:var(--surface);
+  border:1px solid var(--line); border-radius:var(--radius-md); box-shadow:var(--shadow); }
+tr[hidden] { display:none; }
+td { display:grid; grid-template-columns:minmax(6.5rem,0.38fr) minmax(0,1fr); gap:var(--space-sm);
+  align-items:start; padding:var(--space-xs) 0; border-bottom:1px solid var(--line);
+  font-size:var(--text-sm); min-width:0; }
+td:last-child { border-bottom:0; }
+td::before { content:attr(data-label); color:var(--muted); font-size:var(--text-xs);
+  font-weight:650; letter-spacing:0.06em; text-transform:uppercase; }
+tr.disabledrow td { opacity:0.58; }
+td.name { font-weight:650; }
+td.desc { color:var(--muted); max-width:60ch; }
+.chiprow { margin-top:var(--space-2xs); display:flex; gap:var(--space-2xs); flex-wrap:wrap; align-items:center; }
+.cmd { max-width:100%; margin-top:var(--space-2xs); overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; color:var(--muted); font:var(--text-xs)/1.4 var(--font-mono); }
+.chip, .prov, .prov-self { display:inline-block; padding:var(--space-3xs) var(--space-xs);
+  border-radius:var(--radius-pill); font-size:var(--text-xs); font-weight:600; }
+.chip, .prov { border:1px solid var(--line); color:var(--muted); background:var(--bg); }
+.prov, .prov-self { margin-inline-start:var(--space-2xs); vertical-align:0.08rem; }
+.prov-self { color:var(--accent-ink); background:var(--accent); }
 .prov-dim { border-style:dashed; }
-.pill { display:inline-flex; align-items:center; gap:6px; font-size:12px;
-  font-weight:500; padding:3px 10px; border-radius:99px; white-space:nowrap; }
-.pill i { width:7px; height:7px; border-radius:50%; background:currentColor; }
+.pill { display:inline-flex; align-items:center; gap:var(--space-xs);
+  padding:var(--space-3xs) var(--space-xs);
+  border-radius:var(--radius-pill); white-space:nowrap; font-size:var(--text-xs); font-weight:650; }
+.pill i { width:0.45rem; height:0.45rem; border-radius:50%; background:currentColor; }
 .pill.ok { color:var(--ok); background:var(--ok-soft); }
 .pill.bad { color:var(--bad); background:var(--bad-soft); }
 .pill.warn { color:var(--warn); background:var(--warn-soft); }
 .pill.info { color:var(--info); background:var(--info-soft); }
 .pill.off { color:var(--off); background:var(--off-soft); }
-.verdict { display:inline-block; font-size:11px; font-weight:500; padding:2px 8px;
-  border-radius:4px; margin-top:5px; }
+.verdict { display:inline-block; margin-top:var(--space-2xs);
+  padding:var(--space-3xs) var(--space-xs);
+  border-radius:var(--radius-sm); font-size:var(--text-xs); font-weight:650; }
 .v-earning { color:var(--ok); background:var(--ok-soft); }
 .v-broken, .v-unused { color:var(--bad); background:var(--bad-soft); }
 .v-dormant, .v-expensive { color:var(--warn); background:var(--warn-soft); }
 .v-quiet, .v-disabled { color:var(--muted); background:var(--off-soft); }
-.num { font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;
-  font-variant-numeric:tabular-nums; font-size:13px; }
-.sub2 { color:var(--muted); font-size:11.5px; margin-top:2px; white-space:nowrap; }
-.ramcell { min-width:120px; }
-.usecell { min-width:110px; }
-.bar { height:6px; border-radius:4px; background:var(--accent-soft);
-  overflow:hidden; margin-bottom:5px; }
+.num { font:var(--text-sm)/1.4 var(--font-mono); font-variant-numeric:tabular-nums; }
+.sub2 { margin-top:var(--space-3xs); color:var(--muted); font-size:var(--text-xs); white-space:nowrap; }
+.bar { height:0.4rem; margin-bottom:var(--space-2xs); overflow:hidden;
+  border-radius:var(--radius-pill); background:var(--accent-soft); }
 .bar.cpu { background:var(--cpu-soft); }
 .bar.cpu span { background:var(--cpu); }
 .bar.empty { background:transparent; }
-.bar span { display:block; height:100%; border-radius:4px; background:var(--accent); }
-.spark { width:80px; height:20px; vertical-align:middle; margin-left:6px; }
+.bar span { display:block; height:100%; border-radius:inherit; background:var(--accent); }
+.spark { width:5rem; height:1.25rem; vertical-align:middle; margin-inline-start:var(--space-xs); }
 .spark polyline { fill:none; stroke:var(--accent); stroke-width:1.5; }
 .spark circle { fill:var(--accent); }
-.switch { width:38px; height:21px; border-radius:99px; border:1px solid var(--line);
-  background:var(--off-soft); position:relative; cursor:pointer; padding:0;
-  display:inline-block; }
-.switch i { position:absolute; top:2px; left:2px; width:15px; height:15px;
-  border-radius:50%; background:var(--surface); border:1px solid var(--line);
-  transition:left 0.15s; }
-.switch.on { background:var(--ok-soft); border-color:var(--ok); }
-.switch.on i { left:19px; background:var(--ok); border-color:var(--ok); }
+.switch { position:relative; display:inline-grid; place-items:center; width:2.75rem; height:2.75rem;
+  padding:0; border:0; border-radius:var(--radius-pill); background:transparent; cursor:pointer; }
+.switch::before { content:""; position:absolute; width:2.35rem; height:1.35rem;
+  border:1px solid var(--line-strong); border-radius:var(--radius-pill); background:var(--off-soft); }
+.switch i { position:relative; width:0.95rem; height:0.95rem; margin-inline-end:var(--space-md);
+  border:1px solid var(--line-strong); border-radius:50%; background:var(--surface-raised);
+  transition:transform var(--dur-micro) var(--ease-in-out); }
+.switch.on::before { border-color:var(--ok); background:var(--ok-soft); }
+.switch.on i { border-color:var(--ok); background:var(--ok); transform:translateX(0.95rem); }
 .switch.static { cursor:help; opacity:0.6; }
-.btn { font:inherit; font-size:12.5px; font-weight:500; padding:5px 12px;
-  border-radius:4px; border:1px solid var(--line); background:var(--surface);
-  color:var(--ink); cursor:pointer; }
-.btn:hover { border-color:var(--accent); color:var(--accent); }
-.btn.primary { background:var(--accent-soft); border-color:var(--accent); color:var(--accent); }
-.btn.static { cursor:help; opacity:0.6; }
-.rec { display:flex; gap:14px; align-items:flex-start; padding:14px 16px;
-  border-bottom:1px solid var(--line); }
-.rec:last-child { border-bottom:none; }
-.rec .sev { width:4px; align-self:stretch; border-radius:2px; background:var(--muted); flex:none; }
+.switch:disabled, .btn:disabled { cursor:not-allowed; opacity:0.5; }
+.btn { min-height:2.75rem; padding-inline:var(--space-sm); border:1px solid var(--line-strong);
+  border-radius:var(--radius-sm); color:var(--ink); background:var(--surface);
+  cursor:pointer; white-space:nowrap; font-size:var(--text-sm); font-weight:650;
+  transition:transform var(--dur-micro) var(--ease-out); }
+.btn.primary { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
+.btn.static { display:inline-flex; align-items:center; cursor:help; opacity:0.6; }
+.btn:active { transform:translateY(1px); }
+.rec { display:flex; gap:var(--space-sm); align-items:flex-start; margin-bottom:var(--space-sm);
+  padding:var(--space-md); border:1px solid var(--line); border-radius:var(--radius-md);
+  background:var(--surface); box-shadow:var(--shadow); }
+.rec:last-child { margin-bottom:0; }
+.rec .sev { width:0.55rem; height:0.55rem; margin-top:var(--space-2xs); border-radius:50%;
+  background:var(--muted); flex:none; }
 .rec.high .sev { background:var(--bad); }
 .rec.medium .sev { background:var(--warn); }
 .rec.low .sev { background:var(--info); }
-.rec.info .sev { background:var(--line); }
+.rec.info .sev { background:var(--line-strong); }
 .rec .body { flex:1; min-width:0; }
-.rec .title { font-weight:500; font-size:14px; }
-.rec .detail { color:var(--muted); font-size:13px; margin-top:3px; }
-.rec .act { flex:none; display:flex; align-items:center; gap:8px; }
-.saving { font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px;
-  color:var(--accent); white-space:nowrap; }
-.profiles { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-.hbar { display:grid; grid-template-columns:150px 1fr 64px; gap:10px;
-  align-items:center; padding:5px 0; }
-.hbar .track { height:10px; border-radius:3px; background:var(--accent-soft); overflow:hidden; }
-.hbar .track span { display:block; height:100%; background:var(--accent); border-radius:3px; }
-.hbar .lbl { font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rec .title { font-size:var(--text-sm); font-weight:700; }
+.rec .detail { margin-top:var(--space-2xs); max-width:70ch; color:var(--muted); font-size:var(--text-sm); }
+.rec .act { display:flex; flex:none; gap:var(--space-xs); align-items:center; flex-wrap:wrap; }
+.saving { color:var(--accent); white-space:nowrap; font:var(--text-xs)/1.4 var(--font-mono); }
+.profiles { display:flex; gap:var(--space-xs); flex-wrap:wrap; align-items:center; }
+.hbar { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:var(--space-2xs) var(--space-sm);
+  align-items:center; padding:var(--space-xs) 0; }
+.hbar .track { grid-column:1/-1; height:0.55rem; overflow:hidden;
+  border-radius:var(--radius-pill); background:var(--accent-soft); }
+.hbar .track span { display:block; height:100%; border-radius:inherit; background:var(--accent); }
+.hbar .lbl { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-sm); }
 svg[role="img"] { width:100%; height:auto; display:block; }
 .grid { stroke:var(--line); stroke-width:1; }
-.axis { fill:var(--muted); font:11px "IBM Plex Mono",ui-monospace,monospace; }
-.endlabel { fill:var(--accent); font:12px "IBM Plex Mono",ui-monospace,monospace; font-weight:500; }
-.chart-area { fill:var(--accent); opacity:0.12; }
-.chart-line { fill:none; stroke:var(--accent); stroke-width:2;
-  stroke-linejoin:round; stroke-linecap:round; }
+.axis { fill:var(--muted); font:0.65rem var(--font-mono); }
+.endlabel { fill:var(--accent); font:600 0.7rem var(--font-mono); }
+.chart-area { fill:var(--accent); opacity:0.1; }
+.chart-line { fill:none; stroke:var(--accent); stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
 .dot { fill:var(--accent); }
 .dot.end { stroke:var(--surface); stroke-width:1.5; }
-.chart-empty, .emptymsg { color:var(--muted); font-size:13.5px; }
-.chart-empty code, .emptymsg code { font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px; }
-footer { color:var(--muted); font-size:12.5px; line-height:1.6; }
-footer code { font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace; font-size:11.5px; }
+.chart-empty, .emptymsg { color:var(--muted); font-size:var(--text-sm); }
+.emptymsg { display:block; padding:var(--space-md); }
+.chart-empty code, .emptymsg code, footer code { font:var(--text-xs)/1.4 var(--font-mono); }
+.method-note { border-block:1px solid var(--line); padding-block:var(--space-md); }
+.method-note summary { min-height:2.75rem; display:flex; align-items:center; cursor:pointer;
+  color:var(--ink); font-weight:650; }
+.method-note p { max-width:78ch; margin:var(--space-sm) 0 0; color:var(--muted); }
+footer { display:flex; flex-direction:column; gap:var(--space-sm); color:var(--muted);
+  font-size:var(--text-xs); line-height:1.6; }
+.footline { display:flex; gap:var(--space-xs) var(--space-md); justify-content:space-between; flex-wrap:wrap; }
 [hidden] { display:none !important; }
-@media (prefers-reduced-motion: reduce) { .switch i { transition:none; } }
+@media (hover:hover) and (pointer:fine) {
+  .tabs button:hover, .theme-toggle:hover { color:var(--ink); background:var(--off-soft); }
+  .search input:hover { background:var(--surface-raised); }
+  .btn:hover { color:var(--accent); border-color:var(--accent); }
+  .method-note summary:hover { color:var(--accent); }
+  tbody tr:hover { border-color:var(--line-strong); }
+}
+.tabs button:active, .theme-toggle:active, .method-note summary:active { transform:translateY(1px); }
+.tabs button:disabled, .theme-toggle:disabled { cursor:not-allowed; opacity:0.5; }
+@media (min-width:40rem) {
+  body { padding-block-start:var(--space-xl); padding-inline:max(var(--space-lg),env(safe-area-inset-left)); }
+  header { grid-template-columns:minmax(0,1fr) auto; }
+  .header-actions { justify-content:flex-end; flex-wrap:nowrap; }
+  .tabs { order:1; width:auto; }
+  .tabs button { flex:none; }
+  .theme-toggle { order:2; }
+  .tiles { grid-template-columns:repeat(4,minmax(0,1fr)); }
+  .rec { align-items:center; }
+  .hbar { grid-template-columns:9.5rem minmax(0,1fr) 4.5rem; gap:var(--space-sm); }
+  .hbar .track { grid-column:auto; }
+}
+@media (min-width:60rem) {
+  .tiles { grid-template-columns:repeat(8,minmax(0,1fr)); }
+  .tile { grid-column:span 1; }
+  #view-mcp > .tiles .tile:nth-child(3),
+  #view-mcp > .tiles .tile:nth-child(4),
+  #view-advisor > .tiles .tile,
+  #view-skills > .tiles .tile { grid-column:span 2; }
+  .tablewrap { overflow-x:auto; background:var(--surface); border:1px solid var(--line);
+    border-radius:var(--radius-md); box-shadow:var(--shadow); }
+  table { display:table; min-width:52rem; }
+  thead { position:static; display:table-header-group; width:auto; height:auto;
+    overflow:visible; clip-path:none; }
+  tbody { display:table-row-group; }
+  tr { display:table-row; padding:0; border:0; border-radius:0; box-shadow:none; background:transparent; }
+  th, td { display:table-cell; text-align:start; vertical-align:middle; }
+  th { padding:var(--space-sm) var(--space-md); border-bottom:1px solid var(--line);
+    color:var(--muted); font-size:var(--text-xs); font-weight:650;
+    letter-spacing:0.06em; text-transform:uppercase; }
+  td { padding:var(--space-sm) var(--space-md); border-bottom:1px solid var(--line); font-size:var(--text-sm); }
+  td::before { content:none; }
+  tr:last-child td { border-bottom:0; }
+  td.desc { max-width:28rem; }
+  .cmd { max-width:20rem; }
+  .ramcell { min-width:7.5rem; }
+  .usecell { min-width:6.5rem; }
+  .tablewrap .rec { margin:0; border:0; border-bottom:1px solid var(--line);
+    border-radius:0; box-shadow:none; }
+  .tablewrap .rec:last-child { border-bottom:0; }
+}
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after { animation-duration:150ms !important;
+    animation-iteration-count:1 !important; transition-duration:150ms !important; }
+}
 """
 
 STATUS_META = {
@@ -302,7 +425,7 @@ def render_html(servers, skills, history, recs, secrets, shadowed, meta,
         return f'<span class="{cls}">{esc(label)}</span>'
 
     def name_cell(s):
-        return (f'<td class="name">{esc(s["name"])} {prov_chip(s)}'
+        return (f'<td class="name" data-label="Server">{esc(s["name"])} {prov_chip(s)}'
                 f'<div class="chiprow"><span class="chip">{esc(s["agent"])}</span>'
                 f'<span class="chip">{esc(s["scope"])}</span>'
                 f'<span class="chip">{esc(s["transport"])}</span></div>'
@@ -312,21 +435,22 @@ def render_html(servers, skills, history, recs, secrets, shadowed, meta,
         st = "disabled" if not s.get("enabled", True) else s.get("status", "unknown")
         cls, label = STATUS_META.get(st, STATUS_META["unknown"])
         v = s.get("verdict") or "quiet"
-        return (f'<td><span class="pill {cls}"><i></i>{label}</span>'
+        return (f'<td data-label="Status"><span class="pill {cls}"><i></i>{label}</span>'
                 f'<div><span class="verdict v-{v}">{VERDICT_TEXT.get(v, v)}</span></div></td>')
 
     def use_cell(s):
         c30, last = s.get("calls_30d", 0), s.get("last_used")
         sub = (f'<div class="sub2">last {last[:10]}</div>' if last
                else '<div class="sub2">never</div>')
-        return f'<td class="usecell"><span class="num">{c30}</span>{sub}</td>'
+        return (f'<td class="usecell" data-label="Calls 30d">'
+                f'<span class="num">{c30}</span>{sub}</td>')
 
     def ctx_cell(s):
         tok, tools = s.get("ctx_tokens", 0), s.get("tools_count", 0)
         if not tok:
-            return ('<td><span class="num">—</span>'
+            return ('<td data-label="Context"><span class="num">—</span>'
                     '<div class="sub2">not probed</div></td>')
-        return (f'<td><span class="num">{fmt_tokens(tok)}</span>'
+        return (f'<td data-label="Context"><span class="num">{fmt_tokens(tok)}</span>'
                 f'<div class="sub2">{tools} tools</div></td>')
 
     def stdio_row(s):
@@ -340,18 +464,25 @@ def render_html(servers, skills, history, recs, secrets, shadowed, meta,
                    else '<span class="num">—</span>')
         inst = s.get("instances", 0)
         dis = "" if s.get("enabled", True) else ' class="disabledrow"'
-        return (f"<tr{dis}>{name_cell(s)}{status_cell(s)}{use_cell(s)}{ctx_cell(s)}"
-                f'<td class="num">{f"{inst}&times;" if inst else "&mdash;"}</td>'
-                f'<td class="ramcell">{cpucell}</td>'
-                f'<td class="ramcell">{bar}<span class="num">'
+        search = " ".join(str(s.get(k, "")) for k in
+                          ("name", "agent", "scope", "transport", "command", "verdict"))
+        return (f'<tr{dis} data-filter-row="servers" data-search="{esc(search)}">'
+                f'{name_cell(s)}{status_cell(s)}{use_cell(s)}{ctx_cell(s)}'
+                f'<td class="num" data-label="Processes">'
+                f'{f"{inst}&times;" if inst else "&mdash;"}</td>'
+                f'<td class="ramcell" data-label="CPU">{cpucell}</td>'
+                f'<td class="ramcell" data-label="RAM">{bar}<span class="num">'
                 f'{fmt_mb(ram) if ram else "&mdash;"}</span>'
                 f'{svg_sparkline(hist_by_key.get(s["key"], []))}</td>'
-                f"<td>{toggle(s)}</td></tr>")
+                f'<td data-label="Enabled">{toggle(s)}</td></tr>')
 
     def remote_row(s):
         dis = "" if s.get("enabled", True) else ' class="disabledrow"'
-        return (f"<tr{dis}>{name_cell(s)}{status_cell(s)}{use_cell(s)}{ctx_cell(s)}"
-                f"<td>{toggle(s)}</td></tr>")
+        search = " ".join(str(s.get(k, "")) for k in
+                          ("name", "agent", "scope", "transport", "command", "verdict"))
+        return (f'<tr{dis} data-filter-row="servers" data-search="{esc(search)}">'
+                f'{name_cell(s)}{status_cell(s)}{use_cell(s)}{ctx_cell(s)}'
+                f'<td data-label="Enabled">{toggle(s)}</td></tr>')
 
     stdio_rows = "".join(stdio_row(s) for s in stdio) or \
         '<tr><td colspan="8" class="emptymsg">No local stdio MCP servers configured.</td></tr>'
@@ -369,7 +500,7 @@ def render_html(servers, skills, history, recs, secrets, shadowed, meta,
                    '<span class="btn static" title="Run with --serve to act '
                    'from here">Switch off</span>')
         saving = (f'<span class="saving">−{fmt_mb(r["saving_bytes"])}</span>'
-                  if r["saving_bytes"] else "")
+                  if r["saving_bytes"] and r["action"] == "disable" else "")
         return (f'<div class="rec {r["severity"]}"><div class="sev"></div>'
                 f'<div class="body"><div class="title">{esc(r["title"])}</div>'
                 f'<div class="detail">{esc(r["detail"])}</div></div>'
@@ -420,11 +551,14 @@ def render_html(servers, skills, history, recs, secrets, shadowed, meta,
             chips += f'<span class="chip">shadowed by {esc(sk["shadowed_by"])}</span>'
         last = sk.get("last_used")
         desc = sk.get("description", "")
-        return (f'<tr><td class="name">{esc(sk["name"])}'
+        search = " ".join((sk.get("name", ""), sk.get("source", ""), desc))
+        return (f'<tr data-filter-row="skills" data-search="{esc(search)}">'
+                f'<td class="name" data-label="Skill">{esc(sk["name"])}'
                 f'<div class="chiprow">{chips}</div></td>'
-                f'<td><span class="num">{sk.get("calls_30d", 0)}</span>'
+                f'<td data-label="Calls 30d"><span class="num">{sk.get("calls_30d", 0)}</span>'
                 f'<div class="sub2">{("last " + last[:10]) if last else "never"}</div></td>'
-                f'<td class="desc">{esc(desc[:200] + ("…" if len(desc) > 200 else "")) or "—"}</td></tr>')
+                f'<td class="desc" data-label="Description">'
+                f'{esc(desc[:200] + ("…" if len(desc) > 200 else "")) or "—"}</td></tr>')
 
     skills_sorted = sorted(skills, key=lambda s: (-s.get("calls_30d", 0),
                                                   s["source"], s["name"]))
@@ -442,40 +576,47 @@ def render_html(servers, skills, history, recs, secrets, shadowed, meta,
                        f'<div class="tablewrap">{items}</div></section>')
     skill_used = sum(1 for s in skills if s.get("calls_30d", 0) > 0)
 
+    nonce_attr = f' nonce="{esc(token)}"' if token else ""
     live_js = """
-<script>
+<script__NONCE__>
 var MCP_TOKEN = '__TOKEN__';
-function post(url, body, ok) {
+var statusRegion = document.getElementById('status-message');
+function announce(message) {
+  statusRegion.textContent = message || '';
+}
+function post(url, body, btn) {
+  announce('');
+  btn.disabled = true;
+  btn.setAttribute('aria-busy', 'true');
   fetch(url, {method:'POST', headers:{'Content-Type':'application/json',
       'X-MCP-Token': MCP_TOKEN},
     body: JSON.stringify(body)}).then(r => r.json()).then(j => {
-      if (!j.ok) { alert('Failed: ' + j.message); ok(false); }
-      else { location.reload(); }
-    }).catch(e => { alert('Failed: ' + e); ok(false); });
+      if (!j.ok) throw new Error(j.message || 'Request failed');
+      location.reload();
+    }).catch(e => {
+      announce('Could not apply that change: ' + e.message);
+      btn.disabled = false;
+      btn.removeAttribute('aria-busy');
+    });
 }
 document.querySelectorAll('button.switch').forEach(function (btn) {
   btn.addEventListener('click', function () {
-    btn.disabled = true;
-    post('/api/toggle', {key: btn.dataset.key}, function () { btn.disabled = false; });
+    post('/api/toggle', {key: btn.dataset.key}, btn);
   });
 });
 document.querySelectorAll('button[data-act="off"]').forEach(function (btn) {
   btn.addEventListener('click', function () {
-    btn.disabled = true;
-    post('/api/set', {key: btn.dataset.key, enabled: false},
-         function () { btn.disabled = false; });
+    post('/api/set', {key: btn.dataset.key, enabled: false}, btn);
   });
 });
 document.querySelectorAll('button[data-profile]').forEach(function (btn) {
   btn.addEventListener('click', function () {
     if (!confirm('Apply profile "' + btn.dataset.profile + '"? Servers not in it '
                  + 'will be switched off.')) return;
-    btn.disabled = true;
-    post('/api/profile', {name: btn.dataset.profile},
-         function () { btn.disabled = false; });
+    post('/api/profile', {name: btn.dataset.profile}, btn);
   });
 });
-</script>""".replace("__TOKEN__", token)
+</script>""".replace("__TOKEN__", token).replace("__NONCE__", nonce_attr)
 
     cpu_note = ("a live sample" if meta.get("psutil")
                 else "the process-lifetime average (install psutil for live sampling)")
@@ -487,26 +628,34 @@ document.querySelectorAll('button[data-profile]').forEach(function (btn) {
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
 <title>MCP Server Dashboard</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>{CSS}</style>
 </head>
 <body>
 <main>
   <header>
-    <div>
-      <h1>MCP Server Dashboard</h1>
-      <div class="sub">scanned {esc(meta['when'])} &middot; host {esc(meta['host'])}{' &middot; LIVE' if live else ''}{' &middot; DEMO DATA' if meta.get('demo') else ''}</div>
+    <div class="brandline">
+      <div class="brandmark" aria-hidden="true">MCP</div>
+      <div>
+        <h1>MCP Server Dashboard</h1>
+        <div class="sub">scanned {esc(meta['when'])} &middot; host {esc(meta['host'])}{' &middot; LIVE' if live else ''}{' &middot; DEMO DATA' if meta.get('demo') else ''}</div>
+      </div>
     </div>
-    <nav class="tabs" role="tablist">
-      <button role="tab" aria-selected="true" data-tab="mcp">Servers</button>
-      <button role="tab" aria-selected="false" data-tab="advisor">Advisor{f' ({high})' if high else ''}</button>
-      <button role="tab" aria-selected="false" data-tab="skills">Skills</button>
-    </nav>
+    <div class="header-actions">
+      <nav class="tabs" role="tablist" aria-label="Dashboard views">
+        <button id="tab-mcp" role="tab" aria-selected="true" aria-controls="view-mcp" data-tab="mcp">Servers</button>
+        <button id="tab-advisor" role="tab" aria-selected="false" aria-controls="view-advisor" data-tab="advisor">Advisor{f' ({high})' if high else ''}</button>
+        <button id="tab-skills" role="tab" aria-selected="false" aria-controls="view-skills" data-tab="skills">Skills</button>
+      </nav>
+      <button class="theme-toggle" type="button" aria-label="Theme: automatic">Theme: Auto</button>
+    </div>
   </header>
+  <div id="status-message" class="status-message" role="status" aria-live="polite"></div>
 
-  <div id="view-mcp">
+  <div id="view-mcp" role="tabpanel" aria-labelledby="tab-mcp" tabindex="0">
   <div class="tiles">
     <div class="tile"><div class="label">Configured</div>
       <div class="value">{len(servers)}<small> / {disabled_n} off</small></div></div>
@@ -520,6 +669,13 @@ document.querySelectorAll('button[data-profile]').forEach(function (btn) {
       <div class="value">{total_calls}</div></div>
     <div class="tile"><div class="label">Built by you</div>
       <div class="value">{mine}</div></div>
+  </div>
+
+  <div class="toolbar">
+    <label class="search"><span>Filter servers</span>
+      <input type="search" data-filter="servers" placeholder="Name, agent, scope, verdict" autocomplete="off">
+    </label>
+    <div class="filter-summary" data-filter-summary="servers" aria-live="polite"></div>
   </div>
 
   <section>
@@ -549,7 +705,7 @@ document.querySelectorAll('button[data-profile]').forEach(function (btn) {
   </section>
   </div>
 
-  <div id="view-advisor" hidden>
+  <div id="view-advisor" role="tabpanel" aria-labelledby="tab-advisor" tabindex="0" hidden>
   <div class="tiles">
     <div class="tile{' alert' if high else ''}"><div class="label">Needs attention</div>
       <div class="value">{high}</div></div>
@@ -581,7 +737,7 @@ document.querySelectorAll('button[data-profile]').forEach(function (btn) {
   {secret_html}
   </div>
 
-  <div id="view-skills" hidden>
+  <div id="view-skills" role="tabpanel" aria-labelledby="tab-skills" tabindex="0" hidden>
   <div class="tiles">
     <div class="tile hot"><div class="label">Skills installed</div>
       <div class="value">{len(skills)}</div></div>
@@ -591,6 +747,12 @@ document.querySelectorAll('button[data-profile]').forEach(function (btn) {
       <div class="value">{len({s['source'] for s in skills})}</div></div>
     <div class="tile"><div class="label">Collisions</div>
       <div class="value">{len(shadowed)}</div></div>
+  </div>
+  <div class="toolbar">
+    <label class="search"><span>Filter skills</span>
+      <input type="search" data-filter="skills" placeholder="Name, source, description" autocomplete="off">
+    </label>
+    <div class="filter-summary" data-filter-summary="skills" aria-live="polite"></div>
   </div>
   <section>
     <h2>Skill directory <span class="hint">&mdash; vault, project, user, synced, plugins</span></h2>
@@ -605,29 +767,82 @@ document.querySelectorAll('button[data-profile]').forEach(function (btn) {
   </div>
 
   <footer>
-    Each <strong>stdio</strong> server is a real OS process spawned per agent
-    session &mdash; three open sessions run every stdio server three times.
-    Context cost is the tool schemas a server injects into every request;
-    {probe_note}. CPU is {cpu_note}. Usage comes from your Claude Code and
-    Codex transcripts. Provenance:
-    <span class="prov-self" style="vertical-align:0">yours</span> = servers you
-    built (label them in <code>mcp-provenance.json</code>). Switching a server
-    off stashes its config for later; running sessions keep their processes
-    until restarted.
-    Regenerate: <code>python mcp_dashboard.py --open</code> &middot;
-    live control: <code>python mcp_dashboard.py --serve</code>
+    <details class="method-note">
+      <summary>How this dashboard measures cost</summary>
+      <p>Each <strong>stdio</strong> server is a real OS process spawned per agent
+      session &mdash; three open sessions run every stdio server three times.
+      Context cost is the tool schemas a server injects into every request;
+      {probe_note}. CPU is {cpu_note}. Usage comes from your Claude Code and
+      Codex transcripts. Provenance:
+      <span class="prov-self">yours</span> means a server you built. Switching a
+      server off stashes its config; running sessions keep their processes until
+      restarted.</p>
+    </details>
+    <div class="footline"><span>Local-first &middot; dependency-free &middot; MIT licensed</span>
+      <span>Regenerate: <code>python mcp_dashboard.py --open</code> &middot;
+      live control: <code>python mcp_dashboard.py --serve</code></span></div>
   </footer>
 </main>
-<script>
-document.querySelectorAll('.tabs button').forEach(function (btn) {{
-  btn.addEventListener('click', function () {{
-    document.querySelectorAll('.tabs button').forEach(function (b) {{
-      b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
-    }});
-    ['mcp', 'advisor', 'skills'].forEach(function (t) {{
-      document.getElementById('view-' + t).hidden = btn.dataset.tab !== t;
-    }});
+<script{nonce_attr}>
+var tabButtons = Array.from(document.querySelectorAll('.tabs button'));
+function activateTab(btn, moveFocus) {{
+  tabButtons.forEach(function (candidate) {{
+    var active = candidate === btn;
+    candidate.setAttribute('aria-selected', active ? 'true' : 'false');
+    candidate.tabIndex = active ? 0 : -1;
+    document.getElementById(candidate.getAttribute('aria-controls')).hidden = !active;
   }});
+  history.replaceState(null, '', '#' + btn.dataset.tab);
+  if (moveFocus) btn.focus({{preventScroll:true}});
+}}
+tabButtons.forEach(function (btn, index) {{
+  btn.addEventListener('click', function () {{ activateTab(btn, false); }});
+  btn.addEventListener('keydown', function (event) {{
+    var next = null;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabButtons.length;
+    if (event.key === 'ArrowLeft') next = (index - 1 + tabButtons.length) % tabButtons.length;
+    if (event.key === 'Home') next = 0;
+    if (event.key === 'End') next = tabButtons.length - 1;
+    if (next !== null) {{ event.preventDefault(); activateTab(tabButtons[next], true); }}
+  }});
+}});
+var initialTab = tabButtons.find(function (btn) {{ return '#' + btn.dataset.tab === location.hash; }});
+activateTab(initialTab || tabButtons[0], false);
+
+var themeButton = document.querySelector('.theme-toggle');
+var themes = ['auto', 'light', 'dark'];
+function setTheme(mode) {{
+  if (mode === 'auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', mode);
+  themeButton.textContent = 'Theme: ' + mode.charAt(0).toUpperCase() + mode.slice(1);
+  themeButton.setAttribute('aria-label', 'Theme: ' + (mode === 'auto' ? 'automatic' : mode));
+  try {{ localStorage.setItem('mcp-dashboard-theme', mode); }} catch (e) {{}}
+}}
+var savedTheme = 'auto';
+try {{ savedTheme = localStorage.getItem('mcp-dashboard-theme') || 'auto'; }} catch (e) {{}}
+if (!themes.includes(savedTheme)) savedTheme = 'auto';
+setTheme(savedTheme);
+themeButton.addEventListener('click', function () {{
+  var current = document.documentElement.getAttribute('data-theme') || 'auto';
+  setTheme(themes[(themes.indexOf(current) + 1) % themes.length]);
+}});
+
+document.querySelectorAll('[data-filter]').forEach(function (input) {{
+  var kind = input.dataset.filter;
+  var rows = Array.from(document.querySelectorAll('[data-filter-row="' + kind + '"]'));
+  var summary = document.querySelector('[data-filter-summary="' + kind + '"]');
+  function filterRows() {{
+    var query = input.value.trim().toLocaleLowerCase();
+    var visible = 0;
+    rows.forEach(function (row) {{
+      var match = !query || (row.dataset.search || '').toLocaleLowerCase().includes(query);
+      row.hidden = !match;
+      if (match) visible += 1;
+    }});
+    summary.textContent = query ? 'Showing ' + visible + ' of ' + rows.length : rows.length + ' total';
+  }}
+  input.addEventListener('input', filterRows);
+  filterRows();
 }});
 </script>
 {live_js if live else ''}
