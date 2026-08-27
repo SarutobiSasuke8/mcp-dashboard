@@ -211,6 +211,27 @@ class TestCodexToml(TempHomeCase):
         data = load_toml(self.home / ".codex" / "config.toml")
         self.assertEqual(data["mcp_servers"]["keep"]["args"], ["k", "[odd]"])
 
+    def test_fallback_parser_handles_literal_and_basic_strings(self):
+        # Run the no-tomllib parser directly — on 3.11+ tomllib would
+        # otherwise mask its bugs (which is exactly what happened with
+        # literal strings on Python 3.10).
+        from mcpdash.common import parse_toml_fallback
+        text = ("[mcp_servers.win]\n"
+                "command = 'C:\\Tools\\srv.exe'\n"
+                "args = ['--dir', 'C:\\Users\\me\\data', \"esc\\\"aped\"]\n"
+                "url = \"https://x.test/mcp\"\n")
+        data = parse_toml_fallback(text)
+        srv = data["mcp_servers"]["win"]
+        self.assertEqual(srv["command"], "C:\\Tools\\srv.exe")
+        self.assertEqual(srv["args"],
+                         ["--dir", "C:\\Users\\me\\data", 'esc"aped'])
+        self.assertEqual(srv["url"], "https://x.test/mcp")
+        try:
+            import tomllib
+            self.assertEqual(data, tomllib.loads(text))
+        except ImportError:
+            pass
+
 
 class TestToggleAndProfiles(TempHomeCase):
     def setUp(self):
@@ -575,6 +596,30 @@ class TestVaultOutputs(unittest.TestCase):
             self.assertEqual(vaultout.append_tasks([], "2026-08-24T10:00:00",
                                                    path=missing), [])
             self.assertFalse(missing.exists())
+
+
+class TestBackupPruning(unittest.TestCase):
+    def test_keeps_newest_n_and_spares_manual_backups(self):
+        from mcpdash.common import backup_file
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "config.json"
+            target.write_text("{}", encoding="utf-8")
+            # Twelve old tool-made backups plus two hand-made ones.
+            for i in range(12):
+                (Path(td) / f"config.json.bak-202601{i + 10:02d}-120000")\
+                    .write_text("old", encoding="utf-8")
+            manual = [Path(td) / "config.json.bak-2026-08-23",
+                      Path(td) / "config.json.bak-pre-restore"]
+            for m in manual:
+                m.write_text("mine", encoding="utf-8")
+            backup_file(target, keep=10)
+            ours = sorted(p.name for p in Path(td).glob("config.json.bak-*")
+                          if p not in manual)
+            self.assertEqual(len(ours), 10)
+            self.assertNotIn("config.json.bak-20260110-120000", ours)
+            self.assertNotIn("config.json.bak-20260111-120000", ours)
+            for m in manual:
+                self.assertTrue(m.exists(), f"{m.name} was pruned")
 
 
 class TestAtomicWrite(unittest.TestCase):

@@ -107,8 +107,9 @@ def parse_ts(value):
 
 
 def load_toml(path):
-    """Parse TOML via tomllib when available, else a minimal fallback that
-    understands [section.sub] headers and string/number/bool/array values."""
+    """Parse TOML via tomllib when available (3.11+), else a minimal
+    fallback that understands [section.sub] headers and string/number/
+    bool/array values, in both basic ("…") and literal ('…') strings."""
     try:
         text = Path(path).read_text(encoding="utf-8")
     except OSError:
@@ -118,6 +119,12 @@ def load_toml(path):
         return tomllib.loads(text)
     except Exception:
         pass
+    return parse_toml_fallback(text)
+
+
+def parse_toml_fallback(text):
+    """The no-tomllib parser, separated so tests exercise it on every
+    Python version — tomllib would otherwise mask its bugs on 3.11+."""
     data, cur = {}, None
     for raw in text.splitlines():
         line = raw.strip()
@@ -133,10 +140,17 @@ def load_toml(path):
         if m and cur is not None:
             key, val = m.group(1), m.group(2).strip()
             if val.startswith("["):
-                cur[key] = [i.replace('\\"', '"')
-                            for i in re.findall(r'"((?:[^"\\]|\\.)*)"', val)]
+                # Basic ("…", backslash-escaped) and literal ('…', verbatim)
+                # strings, in the order they appear.
+                cur[key] = [seg[0].replace('\\"', '"').replace("\\\\", "\\")
+                            if seg[0] else seg[1]
+                            for seg in re.findall(
+                                r'"((?:[^"\\]|\\.)*)"|\'([^\']*)\'', val)]
             elif val.startswith('"'):
-                cur[key] = val.strip('"')
+                cur[key] = val.strip('"').replace('\\"', '"') \
+                              .replace("\\\\", "\\")
+            elif val.startswith("'"):
+                cur[key] = val.strip("'")
             elif val in ("true", "false"):
                 cur[key] = val == "true"
             else:
@@ -163,12 +177,27 @@ def run_cli(cmd, cwd=None, timeout=60):
     return False, "command not found"
 
 
-def backup_file(path):
+BACKUP_KEEP = 10
+_BACKUP_STAMP_RE = re.compile(r"\.bak-\d{8}-\d{6}$")
+
+
+def backup_file(path, keep=BACKUP_KEEP):
+    """Timestamped copy next to the file, pruning our oldest backups beyond
+    `keep`. Only backups matching this function's own stamp format are ever
+    pruned — a user's hand-made .bak files are left alone."""
     path = Path(path)
-    if path.exists():
-        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        path.with_name(path.name + f".bak-{stamp}").write_text(
-            path.read_text(encoding="utf-8"), encoding="utf-8")
+    if not path.exists():
+        return
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    path.with_name(path.name + f".bak-{stamp}").write_text(
+        path.read_text(encoding="utf-8"), encoding="utf-8")
+    ours = sorted(p for p in path.parent.glob(path.name + ".bak-*")
+                  if _BACKUP_STAMP_RE.search(p.name))
+    for old in ours[:-keep]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
 
 
 def esc(s):
