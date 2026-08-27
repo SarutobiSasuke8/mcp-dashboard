@@ -225,6 +225,9 @@ already-running sessions keep their processes until restarted.
 
 `python -m unittest discover -s tests` runs 62 tests with no third-party
 dependencies, against a throwaway `HOME` so no real config is ever touched.
+Invariant: the test sandbox must always pin `HOME` and `USERPROFILE`
+together — pinning only one let the suite write to the live
+`~/.claude.json` on Windows (2026-08-25 regression).
 Coverage: config discovery across agents, provenance classification, the
 secrets audit's redaction, Codex TOML removal and restoration, disable/enable
 round-trips and their backups, profile application, process matching

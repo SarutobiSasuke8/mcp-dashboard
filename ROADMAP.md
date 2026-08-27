@@ -35,6 +35,9 @@ for anything here — or anything missing from here.
 
 ## Next
 
+- [x] **PowerShell 5.1 compatibility for the scheduler script** —
+      `Register-MCPDashboardScan.ps1` no longer uses the PowerShell 7+ `?.`
+      operator, so it parses on stock Windows PowerShell 5.1
 - [ ] **Packaging** — `pip install mcp-dashboard` / `pipx run`, console entry
       point, so nobody needs to clone to try it
 - [ ] **Probe remote servers** — HTTP/SSE connectors have context cost too;

@@ -51,9 +51,12 @@ if (-not (Test-Path $dashboard)) {
 }
 
 if (-not $PythonPath) {
-    $PythonPath = (Get-Command pythonw.exe -ErrorAction SilentlyContinue)?.Source
+    # `?.` is PowerShell 7+ only; keep this 5.1-compatible.
+    $pyCmd = Get-Command pythonw.exe -ErrorAction SilentlyContinue
+    if ($pyCmd) { $PythonPath = $pyCmd.Source }
     if (-not $PythonPath) {
-        $PythonPath = (Get-Command python.exe -ErrorAction SilentlyContinue)?.Source
+        $pyCmd = Get-Command python.exe -ErrorAction SilentlyContinue
+        if ($pyCmd) { $PythonPath = $pyCmd.Source }
     }
     if (-not $PythonPath) { throw "Python not found on PATH; pass -PythonPath." }
 }
