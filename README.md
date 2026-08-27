@@ -31,6 +31,15 @@ three open sessions run every stdio server three times. Remote connectors
 cost no local RAM but still inject tool schemas into every request. So the
 question is never RAM alone: it is cost versus use.
 
+## Quickstart
+
+```
+git clone https://github.com/SarutobiSasuke8/mcp-dashboard.git
+cd mcp-dashboard
+python mcp_dashboard.py --probe --open     # first run: fills in context cost
+python mcp_dashboard.py --serve            # then act on the Advisor tab
+```
+
 ## Usage
 
 ```

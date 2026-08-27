@@ -19,6 +19,8 @@ for anything here — or anything missing from here.
       real config
 - [x] CI across Ubuntu / Windows / macOS, Python 3.10 and 3.13
 - [x] MIT licensed
+- [x] Backup pruning — the tool keeps its newest 10 backups per config
+      file and never touches hand-made ones
 
 ## Next
 
@@ -29,8 +31,6 @@ for anything here — or anything missing from here.
 - [ ] **One-click re-scoping** — the Advisor already says "only used in
       project X, move it to that project's `.mcp.json`"; add the button that
       does the move
-- [ ] **Backup pruning** — config backups accumulate forever; keep the last N
-      per file
 - [ ] **Real-world Unix validation** — the `ps` path and Unix process matching
       are written and unit-tested but have had far less real-machine mileage
       than Windows; field reports welcome
