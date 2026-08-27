@@ -24,7 +24,7 @@ from .common import SCRIPT_DIR, load_json, parse_ts, save_json
 MCP_NAME_RE = re.compile(r"^mcp__([^_].*?)__(.+)$")
 CODEX_NAME_RE = re.compile(r'"name"\s*:\s*"(?:mcp__)?([\w.-]+?)__([\w.-]+)"')
 CACHE_PATH = SCRIPT_DIR / "mcp-usage-cache.json"
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 CODEX_SKIP = {"function", "type", "shell", "local", "apply", "container"}
 
 
@@ -50,7 +50,7 @@ def _bucket(store, key, day, tool=None):
 
 def parse_claude_file(path):
     """{servers: {...}, skills: {...}} of day-bucketed counts for one file."""
-    servers, skills = {}, {}
+    servers, skills, project = {}, {}, None
     try:
         fh = path.open("r", encoding="utf-8", errors="replace")
     except OSError:
@@ -63,6 +63,9 @@ def parse_claude_file(path):
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            cwd = rec.get("cwd")
+            if isinstance(cwd, str) and cwd:
+                project = Path(cwd).name or cwd
             when = parse_ts(rec.get("timestamp") or rec.get("ts") or "")
             day = when.strftime("%Y-%m-%d") if when else "unknown"
             for blk in _blocks(rec):
@@ -76,7 +79,7 @@ def parse_claude_file(path):
                     sk = (blk.get("input") or {}).get("skill")
                     if isinstance(sk, str) and sk:
                         _bucket(skills, sk.split(":")[-1].lower(), day)
-    return {"servers": servers, "skills": skills}
+    return {"servers": servers, "skills": skills, "project": project}
 
 
 def parse_codex_file(path):
@@ -103,9 +106,9 @@ def parse_codex_file(path):
     return {"servers": servers, "skills": {}}
 
 
-def _scan_root(root, parser, cache, project_of):
+def _scan_root(root, parser, cache, project_of, agent):
     """Parse every JSONL under root, reusing cache entries for files whose
-    size and mtime are unchanged. Returns [(project, parsed)]."""
+    size and mtime are unchanged. Returns [(agent, project, parsed)]."""
     out = []
     if not root.is_dir():
         return out
@@ -116,13 +119,14 @@ def _scan_root(root, parser, cache, project_of):
             continue
         key = str(path)
         hit = cache.get(key)
-        if hit and hit.get("size") == st.st_size and hit.get("mtime") == int(st.st_mtime):
+        if (hit and hit.get("size") == st.st_size
+                and hit.get("mtime_ns") == st.st_mtime_ns):
             parsed = hit["data"]
         else:
             parsed = parser(path)
-            cache[key] = {"size": st.st_size, "mtime": int(st.st_mtime),
+            cache[key] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns,
                           "data": parsed}
-        out.append((project_of(path), parsed))
+        out.append((agent, parsed.get("project") or project_of(path), parsed))
     return out
 
 
@@ -135,39 +139,49 @@ def _empty():
             "projects": {}, "tools": {}}
 
 
+def _add_days(target, days, tools):
+    """Add one transcript bucket to an aggregate and its time windows."""
+    today = datetime.date.today()
+    total = 0
+    for day, count in days.items():
+        total += count
+        if day == "unknown":
+            continue
+        try:
+            parsed_day = datetime.date.fromisoformat(day)
+        except ValueError:
+            continue
+        age = (today - parsed_day).days
+        if 0 <= age <= 30:
+            target["calls_30d"] += count
+        if 0 <= age <= 90:
+            target["calls_90d"] += count
+        if not target["last_used"] or day > target["last_used"][:10]:
+            target["last_used"] = day + "T00:00:00"
+    target["calls"] += total
+    for tool, count in tools.items():
+        target["tools"][tool] = target["tools"].get(tool, 0) + count
+
+
 def _aggregate(chunks, kind):
     """Fold day-buckets into windowed totals against today."""
-    today = datetime.date.today()
     out = {}
-    for project, parsed in chunks:
+    for agent, project, parsed in chunks:
         for name, entry in (parsed.get(kind) or {}).items():
-            e = out.setdefault(name, _empty())
-            total = 0
-            for day, count in entry["days"].items():
-                total += count
-                if day == "unknown":
-                    continue
-                try:
-                    d = datetime.date.fromisoformat(day)
-                except ValueError:
-                    continue
-                age = (today - d).days
-                if age <= 30:
-                    e["calls_30d"] += count
-                if age <= 90:
-                    e["calls_90d"] += count
-                if not e["last_used"] or day > e["last_used"][:10]:
-                    e["last_used"] = day + "T00:00:00"
-            e["calls"] += total
+            key = name if kind == "skills" else f"{agent}::{name}"
+            e = out.setdefault(key, _empty())
+            _add_days(e, entry["days"], entry.get("tools", {}))
             if project:
-                e["projects"][project] = e["projects"].get(project, 0) + total
-            for tool, n in entry.get("tools", {}).items():
-                e["tools"][tool] = e["tools"].get(tool, 0) + n
+                project_entry = e.setdefault("project_usage", {}).setdefault(
+                    project, _empty())
+                _add_days(project_entry, entry["days"], entry.get("tools", {}))
+                project_entry["projects"][project] = project_entry["calls"]
+                e["projects"][project] = project_entry["calls"]
     return out
 
 
 def collect_usage(claude_root=None, codex_root=None, use_cache=True):
-    """Return (server_usage, skill_usage) keyed by lowercase name."""
+    """Return usage keyed by ``agent::server`` and skills by lowercase name."""
     cached = load_json(CACHE_PATH) if use_cache else None
     cache = (cached or {}).get("files", {}) if (cached or {}).get(
         "version") == CACHE_VERSION else {}
@@ -176,8 +190,10 @@ def collect_usage(claude_root=None, codex_root=None, use_cache=True):
     codex_root = Path(codex_root or (Path.home() / ".codex" / "sessions"))
 
     chunks = _scan_root(claude_root, parse_claude_file, cache,
-                        lambda p: p.parent.name.split("-")[-1] or p.parent.name)
-    chunks += _scan_root(codex_root, parse_codex_file, cache, lambda p: "codex")
+                        lambda p: p.parent.name.split("-")[-1] or p.parent.name,
+                        "claude")
+    chunks += _scan_root(codex_root, parse_codex_file, cache, lambda p: "codex",
+                         "codex")
 
     if use_cache:
         live = {str(p) for p in list(claude_root.rglob("*.jsonl"))
@@ -190,14 +206,84 @@ def collect_usage(claude_root=None, codex_root=None, use_cache=True):
 
 
 def attach_usage(servers, usage):
-    for s in servers:
-        u = usage.get(s["name"].lower()) or _empty()
-        s["calls"] = u["calls"]
-        s["calls_30d"] = u["calls_30d"]
-        s["calls_90d"] = u["calls_90d"]
-        s["last_used"] = u["last_used"]
-        s["projects_used"] = dict(sorted(u["projects"].items(),
-                                         key=lambda kv: -kv[1]))
-        s["top_tools"] = dict(sorted(u["tools"].items(),
-                                     key=lambda kv: -kv[1])[:5])
+    """Attach each observed call once, even with duplicate server names.
+
+    Agent transcripts identify the agent and server name. Claude project
+    transcripts also provide a project label, so duplicate project-scoped
+    definitions can be separated where possible. Any genuinely ambiguous
+    remainder is assigned once and explicitly marked rather than copied to
+    every definition and inflated in totals.
+    """
+    groups = {}
+    for server in servers:
+        groups.setdefault((server["agent"], server["name"].lower()), []).append(server)
+
+    for (agent, name), group in groups.items():
+        aggregate = usage.get(f"{agent}::{name}") or usage.get(name) or _empty()
+        if len(group) == 1:
+            _set_usage(group[0], aggregate, "exact")
+            continue
+
+        remaining = dict(aggregate.get("project_usage") or {})
+        allocated = set()
+        for server in sorted(group, key=lambda s: 0 if s.get("scope") == "project" else 1):
+            if server.get("scope") not in ("project", "local"):
+                continue
+            label = _server_project_label(server).casefold()
+            matches = [project for project in remaining
+                       if project.casefold() == label]
+            if matches:
+                project = matches[0]
+                _set_usage(server, remaining.pop(project), "project")
+                allocated.add(id(server))
+
+        unallocated = [s for s in group if id(s) not in allocated]
+        if remaining:
+            residual = _merge_usage(remaining.values())
+            preferred = next((s for s in unallocated if s.get("scope") == "user"),
+                             unallocated[0] if unallocated else group[0])
+            _set_usage(preferred, residual,
+                       "aggregate" if preferred.get("scope") == "user" else "ambiguous")
+            allocated.add(id(preferred))
+        elif not aggregate.get("project_usage") and aggregate.get("calls"):
+            preferred = next((s for s in unallocated if s.get("scope") == "user"),
+                             unallocated[0] if unallocated else group[0])
+            _set_usage(preferred, aggregate, "ambiguous")
+            allocated.add(id(preferred))
+
+        for server in group:
+            if id(server) not in allocated:
+                _set_usage(server, _empty(), "unattributed")
     return servers
+
+
+def _server_project_label(server):
+    origin = Path(str(server.get("origin", "")))
+    return origin.parent.name if origin.name == ".mcp.json" else origin.name
+
+
+def _merge_usage(entries):
+    merged = _empty()
+    for entry in entries:
+        for field in ("calls", "calls_30d", "calls_90d"):
+            merged[field] += entry.get(field, 0)
+        last = entry.get("last_used")
+        if last and (not merged["last_used"] or last > merged["last_used"]):
+            merged["last_used"] = last
+        for project, count in (entry.get("projects") or {}).items():
+            merged["projects"][project] = merged["projects"].get(project, 0) + count
+        for tool, count in (entry.get("tools") or {}).items():
+            merged["tools"][tool] = merged["tools"].get(tool, 0) + count
+    return merged
+
+
+def _set_usage(s, u, attribution):
+    s["calls"] = u["calls"]
+    s["calls_30d"] = u["calls_30d"]
+    s["calls_90d"] = u["calls_90d"]
+    s["last_used"] = u["last_used"]
+    s["projects_used"] = dict(sorted(u["projects"].items(),
+                                     key=lambda kv: -kv[1]))
+    s["top_tools"] = dict(sorted(u["tools"].items(),
+                                 key=lambda kv: -kv[1])[:5])
+    s["usage_attribution"] = attribution

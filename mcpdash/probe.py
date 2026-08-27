@@ -8,9 +8,11 @@ error output when a server fails.
 """
 
 import json
+import hashlib
 import os
 import platform
 import queue
+import signal
 import subprocess
 import threading
 import time
@@ -130,7 +132,13 @@ def _plausible(proc, server):
 
 
 def measure_usage(servers, procs):
-    """Attach instances, RAM, and CPU to each running stdio server."""
+    """Attach each observed process tree to at most one server definition.
+
+    Multiple agents or scopes can configure the same package. A process
+    command line cannot always reveal which definition launched it, but
+    counting it against every matching definition is certainly wrong. Shared
+    matches are distributed once and marked as estimated.
+    """
     children = {}
     for p in procs:
         children.setdefault(p["ppid"], []).append(p)
@@ -146,29 +154,63 @@ def measure_usage(servers, procs):
 
     self_pid = os.getpid()
     skip = _ancestors(self_pid, by_pid) | {self_pid}
-    for s in servers:
-        s.setdefault("instances", 0)
-        s.setdefault("ram_bytes", 0)
-        s.setdefault("cpu_pct", None)
+    matches = {}
+    for index, s in enumerate(servers):
+        s["instances"] = 0
+        s["ram_bytes"] = 0
+        s["cpu_pct"] = None
+        s["process_attribution"] = "none"
         token = s.get("token")
         if s["transport"] != "stdio" or not token or not s.get("enabled", True):
             continue
         tl = token.lower()
-        matched = [p["pid"] for p in procs
-                   if tl in p["cmdline"].lower() and p["pid"] not in skip
-                   and _plausible(p, s)]
-        if not matched:
+        found = {p["pid"] for p in procs
+                 if tl in p["cmdline"].lower() and p["pid"] not in skip
+                 and _plausible(p, s)}
+        if found:
+            matches[index] = found
+
+    all_matched = set().union(*matches.values()) if matches else set()
+
+    def has_matched_ancestor(pid):
+        parent = by_pid.get(pid, {}).get("ppid", 0)
+        seen = set()
+        while parent and parent not in seen:
+            if parent in all_matched:
+                return True
+            seen.add(parent)
+            parent = by_pid.get(parent, {}).get("ppid", 0)
+        return False
+
+    roots = sorted(pid for pid in all_matched if not has_matched_ancestor(pid))
+    assigned_counts = {index: 0 for index in matches}
+    process_sets = {index: set() for index in matches}
+    for root in roots:
+        tree = {root, *descendants(root)}
+        candidates = [index for index, pids in matches.items() if pids & tree]
+        if not candidates:
             continue
-        mset = set(matched)
-        roots = [pid for pid in matched if by_pid.get(pid, {}).get("ppid") not in mset]
-        counted = set(matched)
-        for pid in matched:
-            counted.update(descendants(pid))
-        s["instances"] = len(roots) or len(matched)
-        s["ram_bytes"] = sum(by_pid[p]["rss"] for p in counted if p in by_pid)
-        cpus = [by_pid[p]["cpu"] for p in counted
-                if p in by_pid and by_pid[p]["cpu"] is not None]
-        s["cpu_pct"] = round(sum(cpus), 1) if cpus else None
+        longest = max(len(str(servers[index].get("token") or ""))
+                      for index in candidates)
+        candidates = [index for index in candidates
+                      if len(str(servers[index].get("token") or "")) == longest]
+        chosen = min(candidates, key=lambda index: (assigned_counts[index], index))
+        assigned_counts[chosen] += 1
+        process_sets[chosen].update(tree)
+        label = "exact" if len(candidates) == 1 else "shared-estimate"
+        for index in candidates:
+            servers[index]["process_attribution"] = label
+
+    for index, counted in process_sets.items():
+        if not counted:
+            continue
+        server = servers[index]
+        server["instances"] = assigned_counts[index]
+        server["ram_bytes"] = sum(by_pid[pid]["rss"] for pid in counted
+                                  if pid in by_pid)
+        cpus = [by_pid[pid]["cpu"] for pid in counted
+                if pid in by_pid and by_pid[pid]["cpu"] is not None]
+        server["cpu_pct"] = round(sum(cpus), 1) if cpus else None
 
 
 # ---------------------------------------------------------------------------
@@ -209,13 +251,18 @@ def probe_server(cfg, timeout=25):
         candidates = [str(command) + ext for ext in (".cmd", ".exe", ".bat")] + candidates
 
     proc = last_err = None
+    popen_options = {}
+    if platform.system() == "Windows":
+        popen_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_options["start_new_session"] = True
     for exe in candidates:
         try:
             proc = subprocess.Popen(
                 [exe] + args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, text=True, encoding="utf-8",
                 errors="replace", bufsize=1, env=env,
-                cwd=cfg.get("cwd") or None)
+                cwd=cfg.get("cwd") or None, **popen_options)
             break
         except OSError as exc:
             last_err = exc
@@ -288,21 +335,23 @@ def probe_server(cfg, timeout=25):
         send({"jsonrpc": "2.0", "method": "notifications/initialized"})
         send({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
         tools_msg = await_id(2, time.time() + max(5, timeout / 2))
-        tools = ((tools_msg or {}).get("result") or {}).get("tools") or []
+        if tools_msg is None:
+            result["error"] = "no response to tools/list" + _tail(errbuf)
+            return result
+        if tools_msg.get("error"):
+            result["error"] = "tools/list failed: " + str(tools_msg["error"])[:200]
+            return result
+        tools = (tools_msg.get("result") or {}).get("tools")
+        if not isinstance(tools, list):
+            result["error"] = "tools/list returned an invalid result"
+            return result
         result["ok"] = True
         result["tools"] = len(tools)
         result["tokens"] = int(len(json.dumps(tools)) / CHARS_PER_TOKEN)
         result["tool_names"] = [t.get("name", "") for t in tools][:200]
         return result
     finally:
-        try:
-            proc.terminate()
-            proc.wait(timeout=5)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+        _stop_process_tree(proc)
         for stream in (proc.stdin, proc.stdout, proc.stderr):
             try:
                 stream.close()
@@ -315,6 +364,50 @@ def _tail(errbuf, n=400):
     return f" — stderr: {text[-n:]}" if text else ""
 
 
+def _stop_process_tree(proc):
+    """Stop the launcher and descendants so a probe cannot orphan a server."""
+    if proc.poll() is not None:
+        return
+    try:
+        import psutil  # type: ignore
+        parent = psutil.Process(proc.pid)
+        children = parent.children(recursive=True)
+        for child in children:
+            child.terminate()
+        parent.terminate()
+        _, alive = psutil.wait_procs(children + [parent], timeout=3)
+        for child in alive:
+            child.kill()
+        try:
+            proc.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=1)
+        return
+    except Exception:
+        pass
+    try:
+        if platform.system() == "Windows":
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                           capture_output=True, timeout=5)
+        else:
+            os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+    except (OSError, subprocess.SubprocessError):
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+
+def _probe_fingerprint(cfg):
+    payload = json.dumps(cfg, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:20]
+
+
 def probe_all(servers, timeout=25, only_stdio=True):
     """Probe every enabled stdio server, caching results by key."""
     cache = load_json(PROBE_CACHE_PATH) or {}
@@ -325,6 +418,7 @@ def probe_all(servers, timeout=25, only_stdio=True):
             continue
         res = probe_server(s.get("raw") or {}, timeout=timeout)
         res["at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+        res["config_hash"] = _probe_fingerprint(s.get("raw") or {})
         cache[s["key"]] = res
     save_json(PROBE_CACHE_PATH, cache)
     return cache
@@ -334,9 +428,12 @@ def attach_probe(servers, cache=None):
     cache = cache if cache is not None else (load_json(PROBE_CACHE_PATH) or {})
     for s in servers:
         p = cache.get(s["key"]) or {}
-        s["tools_count"] = p.get("tools") or 0
-        s["ctx_tokens"] = p.get("tokens") or 0
-        s["probe_ms"] = p.get("ms")
-        s["probe_error"] = p.get("error", "")
+        stale = bool(p) and p.get("config_hash") != _probe_fingerprint(
+            s.get("raw") or {})
+        s["probe_stale"] = stale
+        s["tools_count"] = 0 if stale else (p.get("tools") or 0)
+        s["ctx_tokens"] = 0 if stale else (p.get("tokens") or 0)
+        s["probe_ms"] = None if stale else p.get("ms")
+        s["probe_error"] = "" if stale else p.get("error", "")
         s["probe_at"] = p.get("at", "")
     return servers

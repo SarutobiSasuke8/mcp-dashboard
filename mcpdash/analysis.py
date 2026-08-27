@@ -148,9 +148,9 @@ def recommendations(servers, secrets, registry):
             out.append({
                 "severity": "low", "key": s["key"], "action": "review",
                 "title": f"{s['name']}: only used in {proj}",
-                "detail": (f"Configured globally but every recorded call came "
-                           f"from one project. Moving it to that project's "
-                           f".mcp.json keeps it out of every other session."),
+                "detail": ("Configured globally but every recorded call came "
+                           "from one project. Moving it to that project's "
+                           ".mcp.json keeps it out of every other session."),
                 "saving_bytes": ram})
 
         if s.get("probe_ms") and s["probe_ms"] > 3000:

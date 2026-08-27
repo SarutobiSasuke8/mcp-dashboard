@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mcpdash import analysis, config, probe, render, skills, usage, vaultout  # noqa: E402
 from mcpdash.common import (DEFAULT_HTML, DEFAULT_NOTE, DISABLED_PATH,  # noqa: E402
-                            PROBE_CACHE_PATH, PROVENANCE_PATH, fmt_mb,
+                            PROBE_CACHE_PATH, PROVENANCE_PATH, atomic_write, fmt_mb,
                             has_psutil, load_json, save_json)
 from mcpdash.demo import demo_data  # noqa: E402
 
@@ -116,7 +116,8 @@ def export_json(servers, skill_list, recs, totals_d, path):
     def clean(s):
         raw = config.redact_sensitive_config(s.get("raw") or {})
         return {k: v for k, v in
-                {**s, "raw": raw}.items() if k != "token"}
+                {**s, "raw": raw, "command": config.server_command(raw)}.items()
+                if k != "token"}
 
     payload = {
         "generated": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
@@ -133,8 +134,8 @@ def export_json(servers, skill_list, recs, totals_d, path):
 # Serve
 # ---------------------------------------------------------------------------
 
-def serve(args):
-    """Local control surface.
+def _make_http_server(args, token=None, nonce=None, cookie_name=None):
+    """Build the authenticated loopback control surface.
 
     This endpoint edits real agent config, so it binds to loopback, rejects
     non-loopback Host headers, requires a per-run token, and applies strict
@@ -143,14 +144,19 @@ def serve(args):
     """
     from http.server import HTTPServer, BaseHTTPRequestHandler
 
-    token = secrets.token_urlsafe(16)
+    token = token or secrets.token_urlsafe(16)
+    nonce = nonce or secrets.token_urlsafe(16)
+    # Cookies are host-scoped, not port-scoped. A per-run name prevents two
+    # dashboard instances on different ports from invalidating each other.
+    cookie_name = cookie_name or "mcp_dashboard_" + secrets.token_hex(6)
     state = {"servers": []}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *a):
             pass
 
-        def _send(self, code, body, ctype="text/html; charset=utf-8"):
+        def _send(self, code, body, ctype="text/html; charset=utf-8",
+                  establish_session=False):
             data = body.encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", ctype)
@@ -159,13 +165,18 @@ def serve(args):
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+            if establish_session:
+                self.send_header(
+                    "Set-Cookie",
+                    f"{cookie_name}={token}; HttpOnly; SameSite=Strict; Path=/")
             if ctype.startswith("text/html"):
                 self.send_header(
                     "Content-Security-Policy",
                     "default-src 'none'; base-uri 'none'; form-action 'none'; "
                     "frame-ancestors 'none'; img-src 'self' data:; "
                     "font-src 'self'; style-src 'unsafe-inline'; "
-                    f"script-src 'nonce-{token}'; connect-src 'self'")
+                    f"script-src 'nonce-{nonce}'; connect-src 'self'")
             self.end_headers()
             self.wfile.write(data)
 
@@ -179,12 +190,22 @@ def serve(args):
                 return False
             return self.client_address[0] in ("127.0.0.1", "::1")
 
-        def _authorised(self, from_header):
+        def _authorised(self, mutation=False):
             if not self._local():
                 return False
-            if from_header:
-                return secrets.compare_digest(
-                    self.headers.get("X-MCP-Token", ""), token)
+            if mutation:
+                origin = self.headers.get("Origin", "")
+                expected_origin = "http://" + (self.headers.get("Host") or "")
+                if origin != expected_origin:
+                    return False
+                from http.cookies import SimpleCookie
+                cookies = SimpleCookie()
+                try:
+                    cookies.load(self.headers.get("Cookie", ""))
+                except Exception:
+                    return False
+                given = cookies.get(cookie_name)
+                return bool(given) and secrets.compare_digest(given.value, token)
             from urllib.parse import parse_qs, urlparse
             given = parse_qs(urlparse(self.path).query).get("t", [""])[0]
             return secrets.compare_digest(given, token)
@@ -193,7 +214,7 @@ def serve(args):
             if self.path.split("?")[0] not in ("/", "/index.html"):
                 self._send(404, "not found", "text/plain")
                 return
-            if not self._authorised(from_header=False):
+            if not self._authorised(mutation=False):
                 self._send(403, "Forbidden — open the URL printed by the "
                                 "command, which carries this run's token.",
                            "text/plain")
@@ -217,30 +238,40 @@ def serve(args):
                                     default="")}
             html, _, _ = build_page(servers, skills.discover_skills(),
                                     skill_usage, analysis.load_history(), meta,
-                                    live=True, token=token)
+                                    live=True, token=nonce)
             args.html.parent.mkdir(parents=True, exist_ok=True)
-            args.html.write_text(html, encoding="utf-8")
-            self._send(200, html)
+            atomic_write(args.html, html)
+            self._send(200, html, establish_session=True)
 
         def do_POST(self):
             path = self.path.split("?")[0]
-            if not self._authorised(from_header=True):
+            if not self._authorised(mutation=True):
                 self._send(403, json.dumps({"ok": False, "message": "forbidden"}),
                            "application/json")
                 return
             try:
                 body = self._json_body()
+                if not isinstance(body, dict):
+                    raise ValueError("JSON body must be an object")
                 if path == "/api/toggle":
-                    ok, msg = config.toggle_server(body.get("key", ""), state["servers"])
+                    key = body.get("key")
+                    if not isinstance(key, str) or not key:
+                        raise ValueError("key must be a non-empty string")
+                    ok, msg = config.toggle_server(key, state["servers"])
                 elif path == "/api/set":
+                    if not isinstance(body.get("enabled"), bool):
+                        raise ValueError("enabled must be a boolean")
                     entry = next((s for s in state["servers"]
                                   if s["key"] == body.get("key")), None)
                     if entry is None:
                         ok, msg = False, "unknown server"
                     else:
-                        ok, msg = config.set_enabled(entry, bool(body.get("enabled")))
+                        ok, msg = config.set_enabled(entry, body["enabled"])
                 elif path == "/api/profile":
-                    ok, msg = config.apply_profile(body.get("name", ""),
+                    name = body.get("name")
+                    if not isinstance(name, str) or not name:
+                        raise ValueError("name must be a non-empty string")
+                    ok, msg = config.apply_profile(name,
                                                    state["servers"])
                 else:
                     self._send(404, "{}", "application/json")
@@ -258,7 +289,12 @@ def serve(args):
                        json.dumps({"ok": ok, "message": msg}),
                        "application/json")
 
-    httpd = HTTPServer(("127.0.0.1", args.port), Handler)
+    return HTTPServer(("127.0.0.1", args.port), Handler), token
+
+
+def serve(args):
+    """Run the local control surface until interrupted."""
+    httpd, token = _make_http_server(args)
     url = f"http://127.0.0.1:{args.port}/?t={token}"
     print(f"Live dashboard at {url}  (Ctrl+C to stop)")
     print(f"Toggles and profiles edit real config; disabled servers are stashed "
@@ -321,7 +357,10 @@ def main():
     if args.profile:
         servers, _ = scan(use_cli=False)
         ok, msg = config.apply_profile(args.profile, servers)
-        print(("Applied" if ok else "Partly applied") + f" profile '{args.profile}': {msg}")
+        print(("Applied" if ok else "Failed to apply") +
+              f" profile '{args.profile}': {msg}")
+        if not ok:
+            raise SystemExit(1)
         return
 
     if args.serve and not args.demo:
@@ -364,7 +403,7 @@ def main():
                                        analysis.load_history(), meta)
 
     args.html.parent.mkdir(parents=True, exist_ok=True)
-    args.html.write_text(html, encoding="utf-8")
+    atomic_write(args.html, html)
     print(f"Dashboard -> {args.html}")
 
     if not args.demo:

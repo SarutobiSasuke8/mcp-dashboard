@@ -34,7 +34,7 @@ whole design — the tool doesn't just report numbers, it renders a verdict.
 | `mcpdash/render.py` | The three-tab HTML dashboard |
 | `mcpdash/vaultout.py` | Markdown outputs for Obsidian vaults (registry note, usage report, task filing) |
 | `mcpdash/demo.py` | Sample data for reviewing the visual without a real scan |
-| `tests/test_dashboard.py` | 46 tests, standard library only |
+| `tests/test_dashboard.py` | 62 tests, standard library only |
 | `Register-MCPDashboardScan.ps1` | Windows scheduled-task registration |
 | `mcp-provenance.json` | Your provenance labels (committed — no secrets) |
 | `mcp-profiles.json` | Your named server sets (committed — no secrets) |
@@ -60,9 +60,10 @@ either way.
 | Gemini CLI | `~/.gemini/settings.json` | Direct edit |
 | Cursor | `~/.cursor/mcp.json` | Direct edit |
 
-Every direct edit takes a timestamped `.bak-` backup first, and every write
-(config or internal state) goes through a temp-file-then-replace so a crash
-or full disk mid-write can never leave a config file truncated.
+Every config edit, including CLI-routed edits, takes a unique microsecond
+timestamped `.bak-` backup first. Config, JSON state, generated HTML, and
+managed vault-note replacements use temp-file-then-replace so a crash or full
+disk mid-write cannot leave those files truncated.
 
 claude.ai-style hosted connectors are server-side and invisible to local
 scanning — their *usage* still appears if the agent that called them also
@@ -84,14 +85,19 @@ the configured command itself, and never if it is a shell, editor, or search
 tool — and the scanning process's own ancestors are excluded. Without those
 guards, any shell whose command line merely *mentions* a server gets
 miscounted as running it; this was a real bug found and fixed during
-development, now covered by tests.
+development, now covered by tests. When several definitions match one process
+tree, the tree is attributed once and the affected rows are marked estimated;
+the dashboard never multiplies observed RAM to fill an attribution gap.
 
 **Context cost** (`--probe`, opt-in) — starts each stdio server exactly as an
 agent would, completes the MCP `initialize` handshake, and calls
 `tools/list`. That yields the tool count, an estimated token cost of the
 schemas (~4 characters per token), the startup latency, and, when a server
-fails, its real stderr. Cached in `mcp-probe-cache.json` between runs. It's
-opt-in because it has the side effect of actually starting every server.
+fails, its real stderr. A missing or erroneous `tools/list` response is a
+failed probe, and the whole spawned process tree is stopped afterward. Cached
+results carry a configuration fingerprint and are suppressed as stale after
+the definition changes. Probing is opt-in because it has the side effect of
+actually starting every server.
 
 **Usage** — Claude Code writes one JSONL transcript per session under
 `~/.claude/projects/<encoded-cwd>/`, where every tool call appears as a
@@ -103,6 +109,11 @@ Transcripts are parsed once per run and cached per file by size and mtime
 with day-bucketed counts, so a scheduled scan doesn't re-read hundreds of
 sessions on every tick, and timestamps are converted from UTC before
 bucketing so the windows don't skew by the local offset.
+
+Server use is keyed by agent plus server name. When Claude provides a project
+working directory, project/local definitions receive only that project's
+calls; an ambiguous remainder is assigned once and marked rather than copied
+onto every same-named definition.
 
 ---
 
@@ -145,7 +156,8 @@ its cost, so it isn't judged before it has had a chance to be used.
 The Advisor view turns verdicts into ranked actions with estimated savings:
 disable unused/dormant servers, fix or remove broken ones, demote
 single-project servers to project scope, flag slow starters, and surface
-plaintext credentials found in config `env` blocks (values redacted, never
+plaintext credentials found in config, including environment variables,
+headers, command arguments, and authenticated URLs (values redacted, never
 echoed in full).
 
 ---
@@ -162,18 +174,19 @@ python mcp_dashboard.py --serve      # http://127.0.0.1:7817/?t=<token>
   and stashes the full config in `mcp-disabled.json`; switching on restores
   it.
 - **Profiles** — named sets in `mcp-profiles.json`. Applying one enables its
-  members and disables everything else, across all agents at once.
+  members and disables everything else, across all agents at once. A snapshot
+  of every affected config and the disabled stash is restored if any step
+  fails, so a profile cannot be left half-applied.
 
 Because this endpoint edits real config, it is defended in layers:
 
 1. **Loopback only** — the socket binds to `127.0.0.1`.
 2. **Host-header check** — a request whose `Host` isn't loopback is rejected,
    which blocks DNS-rebinding attacks from a page open in the browser.
-3. **Per-run token** — required in the query string for the page and in an
-   `X-MCP-Token` header for every mutating call. A cross-origin page cannot
-   attach a custom header without triggering a CORS preflight, which this
-   server never answers with an allow — so the token can't be exfiltrated
-   that way either.
+3. **Per-run session** — the query token is exchanged for an `HttpOnly`,
+   `SameSite=Strict` loopback cookie. Mutation requests must also carry the
+   exact expected `Origin`; the control credential is never exposed to page
+   JavaScript.
 4. **Browser policy** — live HTML gets a nonce-based Content Security Policy,
    `no-store`, `no-referrer`, frame denial, and MIME sniffing protection. The
    dashboard loads no remote fonts, scripts, or styles.
@@ -210,7 +223,7 @@ already-running sessions keep their processes until restarted.
 
 ## Verification
 
-`python -m unittest discover -s tests` runs 46 tests with no third-party
+`python -m unittest discover -s tests` runs 62 tests with no third-party
 dependencies, against a throwaway `HOME` so no real config is ever touched.
 Coverage: config discovery across agents, provenance classification, the
 secrets audit's redaction, Codex TOML removal and restoration, disable/enable
@@ -220,7 +233,9 @@ against a real stdio server plus its failure paths, usage windows and
 timezone handling, the transcript parse cache, verdicts and recommendations,
 skill shadowing and multi-root discovery, responsive HTML structure, nonce
 placement, HTML escaping, recursive secret redaction, project-key uniqueness,
-and the note/task writers.
+non-duplicating usage/process attribution, transactional profile rollback,
+probe-cache invalidation, fail-safe note writing, and authenticated loopback
+HTTP requests with their browser-security headers.
 
 Four defects were caught this way during development and fixed: `owner/name`
 packages were labelled `unlabeled` instead of `community`; the seven-day
@@ -234,8 +249,9 @@ collided with itself.
 
 ## Known limits
 
-- Usage attribution is by server *name*; two agents configured with the same
-  server name share a usage count.
+- A process command line does not identify its launching agent. When identical
+  definitions match the same tree, the dashboard assigns that tree once and
+  labels the per-row attribution as estimated.
 - Codex transcript parsing is best-effort — its rollout format is less
   stable than Claude Code's transcript format.
 - Context-token figures are estimates from schema size (~4 chars/token), not

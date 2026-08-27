@@ -5,6 +5,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -185,7 +186,7 @@ def run_cli(cmd, cwd=None, timeout=60):
 
 
 BACKUP_KEEP = 10
-_BACKUP_STAMP_RE = re.compile(r"\.bak-\d{8}-\d{6}$")
+_BACKUP_STAMP_RE = re.compile(r"\.bak-\d{8}-\d{6}(?:-\d{6})?$")
 
 
 def backup_file(path, keep=BACKUP_KEEP):
@@ -195,9 +196,11 @@ def backup_file(path, keep=BACKUP_KEEP):
     path = Path(path)
     if not path.exists():
         return
-    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    path.with_name(path.name + f".bak-{stamp}").write_text(
-        path.read_text(encoding="utf-8"), encoding="utf-8")
+    # Microseconds prevent two rapid mutations (or a CLI fallback in the
+    # same second) from overwriting the only pristine recovery point.
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    destination = path.with_name(path.name + f".bak-{stamp}")
+    shutil.copy2(path, destination)
     ours = sorted(p for p in path.parent.glob(path.name + ".bak-*")
                   if _BACKUP_STAMP_RE.search(p.name))
     for old in ours[:-keep]:

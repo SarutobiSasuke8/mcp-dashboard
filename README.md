@@ -51,12 +51,12 @@ python mcp_dashboard.py --report        # append a snapshot to the vault report
 python mcp_dashboard.py --tasks         # file high-severity findings as tasks
 python mcp_dashboard.py --profile coding    # apply a named server set
 python mcp_dashboard.py --list-profiles
-python mcp_dashboard.py --json out.json # machine-readable snapshot (env redacted)
+python mcp_dashboard.py --json out.json # machine-readable snapshot (credentials redacted)
 python mcp_dashboard.py --no-cli        # skip `claude mcp list` (faster)
 python mcp_dashboard.py --demo          # sample data, to preview the visual
 ```
 
-Tests: `python -m unittest discover -s tests` (standard library only; 46 tests).
+Tests: `python -m unittest discover -s tests` (standard library only; 62 tests).
 
 Windows: use `py mcp_dashboard.py ...` if `python` isn't on your PATH.
 Optional: `pip install psutil` for live CPU sampling (and any CPU reading at
@@ -92,14 +92,19 @@ view and theme survive live-control reloads.
 - **RAM/CPU**: process table via psutil, else `ps` / PowerShell
   `Get-CimInstance`; matches each server's most distinctive command token and
   sums the process tree. Shells, editors, and search tools are never counted,
-  and neither are this script's own ancestors.
+  and neither are this script's own ancestors. A process tree matching more
+  than one configured definition is counted once and marked as estimated.
 - **Context cost** (`--probe`): starts each stdio server, completes the MCP
   `initialize` handshake, calls `tools/list`, and records tool count,
   estimated schema tokens, startup latency, and real stderr on failure.
-  Cached in `mcp-probe-cache.json`.
+  Cached in `mcp-probe-cache.json`; a configuration fingerprint invalidates
+  stale results automatically.
 - **Usage**: `tool_use` blocks named `mcp__<server>__<tool>` in Claude Code
   transcripts (`~/.claude/projects/**/*.jsonl`), plus best-effort parsing of
-  Codex rollout logs. Skill invocations are counted the same way.
+  Codex rollout logs. Counts are separated by agent and attributed to a
+  matching project definition where the transcript identifies one, so
+  duplicate configurations do not multiply totals. Skill invocations are
+  counted the same way.
 
 ## Verdicts
 
@@ -125,14 +130,18 @@ Off removes the server from that agent's config (CLI first, direct file edit
 with a timestamped backup as fallback) and stashes it in
 `mcp-disabled.json`; on restores it. Profiles in `mcp-profiles.json` enable
 a named set and disable everything else, across all agents at once. Changes
-apply to **new** sessions.
+apply to **new** sessions. Profile changes are transactional: if any mutation
+fails, the affected config and stash files are restored to their pre-profile
+state.
 
 Because this endpoint edits real config, it binds to loopback only, rejects a
 non-loopback `Host` (blocking DNS rebinding), and requires a per-run token —
-in the query string for the page and an `X-MCP-Token` header for mutations.
-The live response also sends a nonce-based Content Security Policy, disables
-framing and caching, and suppresses referrers. Open the URL the command prints;
-the token is in it.
+the initial query token establishes a short-lived `HttpOnly`,
+`SameSite=Strict` loopback session cookie, and mutations require an exact
+same-origin request. The live response also sends a separate nonce-based
+Content Security Policy, disables framing and caching, and suppresses
+referrers. Open the URL the command prints; the token is removed from the
+visible URL once the page initializes.
 
 ## Scheduling
 
@@ -169,7 +178,8 @@ Every config edit — including ones routed through the `claude`/`codex`
 CLIs — takes a timestamped backup of the file first, and disabled servers
 are stashed in full so switching them back on is lossless. Machine-readable
 exports recursively redact credential-like values in environment, header,
-and vendor-specific config blocks. The test suite runs inside a hard sandbox
+command arguments, authenticated URLs, query parameters, and vendor-specific
+config blocks. The test suite runs inside a hard sandbox
 (`Path.home` patched, agent CLIs stubbed) and can never touch your real config.
 
 ## License

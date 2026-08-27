@@ -442,11 +442,17 @@ def render_html(servers, skills, history, recs, secrets, shadowed, meta,
         c30, last = s.get("calls_30d", 0), s.get("last_used")
         sub = (f'<div class="sub2">last {last[:10]}</div>' if last
                else '<div class="sub2">never</div>')
+        attribution = s.get("usage_attribution")
+        if attribution in ("ambiguous", "unattributed"):
+            sub += f'<div class="sub2">{esc(attribution)} attribution</div>'
         return (f'<td class="usecell" data-label="Calls 30d">'
                 f'<span class="num">{c30}</span>{sub}</td>')
 
     def ctx_cell(s):
         tok, tools = s.get("ctx_tokens", 0), s.get("tools_count", 0)
+        if s.get("probe_stale"):
+            return ('<td data-label="Context"><span class="num">—</span>'
+                    '<div class="sub2">probe stale</div></td>')
         if not tok:
             return ('<td data-label="Context"><span class="num">—</span>'
                     '<div class="sub2">not probed</div></td>')
@@ -463,13 +469,15 @@ def render_html(servers, skills, history, recs, secrets, shadowed, meta,
                    f'<span class="num">{cpu:g}%</span>' if cpu
                    else '<span class="num">—</span>')
         inst = s.get("instances", 0)
+        process_note = ('<div class="sub2">estimated</div>'
+                        if s.get("process_attribution") == "shared-estimate" else "")
         dis = "" if s.get("enabled", True) else ' class="disabledrow"'
         search = " ".join(str(s.get(k, "")) for k in
                           ("name", "agent", "scope", "transport", "command", "verdict"))
         return (f'<tr{dis} data-filter-row="servers" data-search="{esc(search)}">'
                 f'{name_cell(s)}{status_cell(s)}{use_cell(s)}{ctx_cell(s)}'
                 f'<td class="num" data-label="Processes">'
-                f'{f"{inst}&times;" if inst else "&mdash;"}</td>'
+                f'{f"{inst}&times;" if inst else "&mdash;"}{process_note}</td>'
                 f'<td class="ramcell" data-label="CPU">{cpucell}</td>'
                 f'<td class="ramcell" data-label="RAM">{bar}<span class="num">'
                 f'{fmt_mb(ram) if ram else "&mdash;"}</span>'
@@ -579,7 +587,6 @@ def render_html(servers, skills, history, recs, secrets, shadowed, meta,
     nonce_attr = f' nonce="{esc(token)}"' if token else ""
     live_js = """
 <script__NONCE__>
-var MCP_TOKEN = '__TOKEN__';
 var statusRegion = document.getElementById('status-message');
 function announce(message) {
   statusRegion.textContent = message || '';
@@ -588,8 +595,7 @@ function post(url, body, btn) {
   announce('');
   btn.disabled = true;
   btn.setAttribute('aria-busy', 'true');
-  fetch(url, {method:'POST', headers:{'Content-Type':'application/json',
-      'X-MCP-Token': MCP_TOKEN},
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify(body)}).then(r => r.json()).then(j => {
       if (!j.ok) throw new Error(j.message || 'Request failed');
       location.reload();
@@ -616,7 +622,7 @@ document.querySelectorAll('button[data-profile]').forEach(function (btn) {
     post('/api/profile', {name: btn.dataset.profile}, btn);
   });
 });
-</script>""".replace("__TOKEN__", token).replace("__NONCE__", nonce_attr)
+</script>""".replace("__NONCE__", nonce_attr)
 
     cpu_note = ("a live sample" if meta.get("psutil")
                 else "the process-lifetime average (install psutil for live sampling)")

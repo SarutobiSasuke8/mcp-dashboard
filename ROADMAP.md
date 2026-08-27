@@ -19,7 +19,13 @@ for anything here — or anything missing from here.
       automatic/light/dark theme, and mobile card views
 - [x] Recursive config-secret redaction plus nonce-based live-page browser
       hardening headers
-- [x] Test suite (46 tests, stdlib only) with hard sandbox isolation —
+- [x] Agent-aware usage attribution and globally deduplicated process trees
+- [x] Transactional profile application, collision-proof backups, and
+      fail-safe atomic vault outputs
+- [x] Probe config fingerprints, strict `tools/list` validation, and spawned
+      process-tree cleanup
+- [x] `HttpOnly` loopback control session with exact-origin mutation checks
+- [x] Test suite (62 tests, stdlib only) with hard sandbox isolation —
       `Path.home` patched, agent CLIs stubbed, so tests can never touch
       real config
 - [x] CI across Ubuntu / Windows / macOS, Python 3.10 and 3.13

@@ -9,6 +9,7 @@ restored later; every direct file edit takes a timestamped backup first.
 import os
 import re
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .common import (DISABLED_PATH, GENERIC_COMMANDS, PROFILES_PATH,
                      PROVENANCE_PATH, atomic_write, backup_file, load_json,
@@ -27,6 +28,9 @@ SECRET_KEY_RE = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|"
                            r"COOKIE|PRIVATE)", re.I)
 SECRET_VALUE_RE = re.compile(
     r"^(?:sk-|ghp_|github_pat_|xox[baprs]-|AIza|glpat-|Bearer\s+)", re.I)
+SECRET_OPTION_RE = re.compile(
+    r"^(--?(?:api[-_]?key|token|secret|password|passwd|credential|auth|"
+    r"authorization|bearer|cookie|private[-_]?key))(?:[=:](.*))?$", re.I)
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +51,60 @@ def server_command(cfg):
         return cfg.get("url") or cfg.get("httpUrl") or ""
     parts = [cfg.get("command", "")] + list(cfg.get("args", []))
     return " ".join(str(p) for p in parts if p)
+
+
+def _redact_url(value):
+    """Redact credentials embedded in an HTTP URL without hiding its host."""
+    if not isinstance(value, str) or not re.match(r"^https?://", value, re.I):
+        return value, False
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return value, False
+    changed = False
+    host = parsed.hostname or ""
+    if parsed.port:
+        host += f":{parsed.port}"
+    if parsed.username is not None or parsed.password is not None:
+        host = "<redacted>@" + host
+        changed = True
+    query = []
+    for key, child in parse_qsl(parsed.query, keep_blank_values=True):
+        if SECRET_KEY_RE.search(key):
+            child = "<redacted>"
+            changed = True
+        query.append((key, child))
+    clean = urlunsplit((parsed.scheme, host, parsed.path,
+                        urlencode(query, doseq=True), parsed.fragment))
+    return clean, changed
+
+
+def _redact_args(values):
+    out, findings, hide_next = [], [], False
+    for index, value in enumerate(values):
+        text = str(value)
+        if hide_next:
+            out.append("<redacted>")
+            findings.append((index, text))
+            hide_next = False
+            continue
+        option = SECRET_OPTION_RE.match(text)
+        if option:
+            if option.group(2) is None:
+                out.append(text)
+                hide_next = True
+            else:
+                separator = "=" if "=" in text else ":"
+                out.append(option.group(1) + separator + "<redacted>")
+                findings.append((index, option.group(2)))
+            continue
+        clean_url, changed = _redact_url(text)
+        if changed or _looks_secret("", text):
+            out.append(clean_url if changed else "<redacted>")
+            findings.append((index, text))
+        else:
+            out.append(value)
+    return out, findings
 
 
 def match_token(cfg):
@@ -146,9 +204,11 @@ def discover_servers():
         if key in seen or not isinstance(cfg, dict):
             return
         seen.add(key)
+        display_cfg = redact_sensitive_config(cfg)
         servers.append({
             "name": name, "agent": agent, "scope": scope, "origin": origin,
-            "transport": server_transport(cfg), "command": server_command(cfg),
+            "transport": server_transport(cfg),
+            "command": server_command(display_cfg),
             "token": match_token(cfg), "raw": cfg, "enabled": True,
         })
 
@@ -188,10 +248,11 @@ def discover_servers():
         if k in seen:
             continue
         seen.add(k)
+        display_cfg = redact_sensitive_config(cfg)
         servers.append({
             "name": e["name"], "agent": e["agent"], "scope": e["scope"],
             "origin": e.get("origin", ""), "transport": server_transport(cfg),
-            "command": server_command(cfg), "token": match_token(cfg),
+            "command": server_command(display_cfg), "token": match_token(cfg),
             "raw": cfg, "enabled": False,
         })
 
@@ -222,7 +283,14 @@ def _walk_config(value, path=()):
     if isinstance(value, dict):
         for key, child in value.items():
             child_path = path + (str(key),)
+            if str(key) == "args" and isinstance(child, list):
+                _, findings = _redact_args(child)
+                for index, secret in findings:
+                    yield child_path + (str(index),), secret
+                continue
             if _looks_secret(key, child):
+                yield child_path, child
+            elif isinstance(child, str) and _redact_url(child)[1]:
                 yield child_path, child
             else:
                 yield from _walk_config(child, child_path)
@@ -245,8 +313,12 @@ def redact_sensitive_config(value):
     if isinstance(value, dict):
         out = {}
         for key, child in value.items():
-            if _looks_secret(key, child):
+            if str(key) == "args" and isinstance(child, list):
+                out[key] = _redact_args(child)[0]
+            elif _looks_secret(key, child):
                 out[key] = "<redacted>"
+            elif isinstance(child, str) and _redact_url(child)[1]:
+                out[key] = _redact_url(child)[0]
             else:
                 out[key] = redact_sensitive_config(child)
         return out
@@ -276,22 +348,30 @@ def secret_findings(servers):
 # Enable / disable
 # ---------------------------------------------------------------------------
 
-def _json_file_remove(path, name, container="mcpServers", project=None):
+def _json_file_remove(path, name, container="mcpServers", project=None,
+                      make_backup=True):
     data = load_json(path)
     if data is None:
         return False, f"could not read {path}"
-    backup_file(path)
-    if project is not None:
-        ((data.get("projects") or {}).get(project) or {}).get(container, {}).pop(name, None)
-    else:
-        (data.get(container) or {}).pop(name, None)
+    target = (((data.get("projects") or {}).get(project) or {}).get(container, {})
+              if project is not None else (data.get(container) or {}))
+    if name not in target:
+        return False, f"server '{name}' not found in {Path(path).name}"
+    if make_backup:
+        backup_file(path)
+    target.pop(name)
     save_json(path, data)
     return True, f"removed by editing {Path(path).name} (backup made)"
 
 
-def _json_file_add(path, name, cfg, container="mcpServers", project=None):
-    data = load_json(path) or {}
-    backup_file(path)
+def _json_file_add(path, name, cfg, container="mcpServers", project=None,
+                   make_backup=True):
+    data = load_json(path)
+    if data is None and Path(path).exists():
+        return False, f"could not parse {path}; original left untouched"
+    data = data or {}
+    if make_backup:
+        backup_file(path)
     if project is not None:
         data.setdefault("projects", {}).setdefault(project, {}).setdefault(
             container, {})[name] = cfg
@@ -313,11 +393,12 @@ def claude_disable(e):
     if ok:
         return True, "removed via claude CLI"
     if scope == "user":
-        return _json_file_remove(Path.home() / ".claude.json", e["name"])
+        return _json_file_remove(Path.home() / ".claude.json", e["name"],
+                                 make_backup=False)
     if scope == "local":
         return _json_file_remove(Path.home() / ".claude.json", e["name"],
-                                 project=origin)
-    return _json_file_remove(Path(origin), e["name"])
+                                 project=origin, make_backup=False)
+    return _json_file_remove(Path(origin), e["name"], make_backup=False)
 
 
 def claude_enable(e):
@@ -325,16 +406,19 @@ def claude_enable(e):
     scope, origin = e["scope"], e["origin"]
     cwd = origin if scope == "local" else (
         str(Path(origin).parent) if scope == "project" else None)
+    target = Path(origin) if scope == "project" else Path.home() / ".claude.json"
+    backup_file(target)
     ok, out = run_cli(["claude", "mcp", "add-json", e["name"],
                        _json.dumps(e["raw"]), "-s", scope], cwd=cwd)
     if ok:
         return True, "restored via claude CLI"
     if scope == "user":
-        return _json_file_add(Path.home() / ".claude.json", e["name"], e["raw"])
+        return _json_file_add(Path.home() / ".claude.json", e["name"], e["raw"],
+                              make_backup=False)
     if scope == "local":
         return _json_file_add(Path.home() / ".claude.json", e["name"], e["raw"],
-                              project=origin)
-    return _json_file_add(Path(origin), e["name"], e["raw"])
+                              project=origin, make_backup=False)
+    return _json_file_add(Path(origin), e["name"], e["raw"], make_backup=False)
 
 
 def codex_disable(e):
@@ -348,7 +432,6 @@ def codex_disable(e):
         text = path.read_text(encoding="utf-8")
     except OSError:
         return False, out
-    backup_file(path)
     # Match the server's table and any sub-tables ([mcp_servers.x.env]) up to
     # the next table header at the start of a line. Value arrays contain "["
     # too, so the stop condition must be anchored, not the next bracket.
@@ -389,11 +472,11 @@ def codex_enable(e):
         cmd += ["--env", f"{k}={v}"]
     if cfg.get("command"):
         cmd += ["--", str(cfg["command"])] + [str(a) for a in cfg.get("args", [])]
+    path = codex_toml_path()
+    backup_file(path)
     ok, out = run_cli(cmd)
     if ok:
         return True, "restored via codex CLI"
-    path = codex_toml_path()
-    backup_file(path)
     table_name = _toml_key(e["name"])
     lines = [f'[mcp_servers.{table_name}]']
     if cfg.get("command"):
@@ -500,19 +583,59 @@ def apply_profile(name, servers):
     if name not in profiles:
         return False, f"unknown profile: {name}"
     wanted = {n.lower() for n in profiles[name]}
-    changed, failed = [], []
-    for s in servers:
-        should = s["name"].lower() in wanted
-        if should == s.get("enabled", True):
-            continue
-        ok, msg = set_enabled(s, should)
-        (changed if ok else failed).append(
-            f"{s['name']} {'on' if should else 'off'}" + ("" if ok else f" ({msg})"))
-    if not changed and not failed:
+    planned = [s for s in servers
+               if (s["name"].lower() in wanted) != s.get("enabled", True)]
+    if not planned:
         return True, f"profile '{name}' already applied"
-    parts = []
-    if changed:
-        parts.append("changed: " + ", ".join(changed))
-    if failed:
-        parts.append("failed: " + ", ".join(failed))
-    return not failed, "; ".join(parts)
+
+    snapshots = {}
+    for s in planned:
+        path = _config_path(s)
+        if path not in snapshots:
+            try:
+                snapshots[path] = path.read_text(encoding="utf-8")
+            except OSError:
+                snapshots[path] = None
+    try:
+        snapshots[DISABLED_PATH] = DISABLED_PATH.read_text(encoding="utf-8")
+    except OSError:
+        snapshots[DISABLED_PATH] = None
+
+    changed = []
+    for s in planned:
+        should = s["name"].lower() in wanted
+        ok, msg = set_enabled(s, should)
+        label = f"{s['name']} {'on' if should else 'off'}"
+        if not ok:
+            rollback_errors = _restore_snapshots(snapshots)
+            detail = f"failed: {label} ({msg}); earlier changes rolled back"
+            if rollback_errors:
+                detail += "; rollback warnings: " + ", ".join(rollback_errors)
+            return False, detail
+        changed.append(label)
+    return True, "changed: " + ", ".join(changed)
+
+
+def _config_path(entry):
+    agent, scope = entry["agent"], entry["scope"]
+    if agent == "claude":
+        return Path(entry["origin"]) if scope == "project" else Path.home() / ".claude.json"
+    if agent == "codex":
+        return codex_toml_path()
+    if agent == "gemini":
+        return gemini_settings_path()
+    return cursor_mcp_path()
+
+
+def _restore_snapshots(snapshots):
+    errors = []
+    for path, text in snapshots.items():
+        try:
+            if text is None:
+                if path.exists():
+                    path.unlink()
+            else:
+                atomic_write(path, text)
+        except OSError as exc:
+            errors.append(f"{path}: {exc}")
+    return errors

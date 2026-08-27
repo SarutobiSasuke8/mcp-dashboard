@@ -14,8 +14,12 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
+import urllib.error
+import urllib.request
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -213,6 +217,33 @@ class TestSecrets(TempHomeCase):
         self.assertIn("<redacted>", exported)
         self.assertIn("public-value", exported)
 
+    def test_command_arguments_and_urls_are_redacted_everywhere(self):
+        from mcp_dashboard import export_json
+        from mcpdash import render
+
+        raw = {"command": "node", "args": ["server.js", "--api-key",
+                                              "super-secret-value"],
+               "url": "https://user:pass@example.test/mcp?token=query-secret"}
+        clean = config.redact_sensitive_config(raw)
+        self.assertEqual(clean["args"][-1], "<redacted>")
+        self.assertNotIn("pass", clean["url"])
+        self.assertNotIn("query-secret", clean["url"])
+
+        server = {"name": "s", "agent": "claude", "scope": "user",
+                  "origin": "x", "key": "claude::user::s", "raw": raw,
+                  "command": config.server_command(clean), "transport": "stdio",
+                  "enabled": True, "status": "idle", "verdict": "quiet",
+                  "provenance": "vendor", "ram_bytes": 0, "calls_30d": 0}
+        html = render.render_html([server], [], [], [], [], [],
+                                  {"when": "now", "host": "test"}, profiles={})
+        with tempfile.TemporaryDirectory() as td:
+            destination = Path(td) / "snapshot.json"
+            export_json([server], [], [], {}, destination)
+            exported = destination.read_text(encoding="utf-8")
+        for secret in ("super-secret-value", "pass", "query-secret"):
+            self.assertNotIn(secret, html)
+            self.assertNotIn(secret, exported)
+
 
 class TestCodexToml(TempHomeCase):
     SAMPLE = ('model = "gpt-5"\n\n[mcp_servers.memory]\ncommand = "npx"\n'
@@ -331,6 +362,18 @@ class TestToggleAndProfiles(TempHomeCase):
         restored = json.loads(backups[0].read_text(encoding="utf-8"))
         self.assertIn("a", restored["mcpServers"])
 
+    def test_direct_edit_refuses_missing_server_and_malformed_json(self):
+        target = self.home / ".claude.json"
+        before = target.read_text(encoding="utf-8")
+        ok, _ = config._json_file_remove(target, "missing")
+        self.assertFalse(ok)
+        self.assertEqual(target.read_text(encoding="utf-8"), before)
+
+        target.write_text("{broken", encoding="utf-8")
+        ok, _ = config._json_file_add(target, "new", {"command": "node"})
+        self.assertFalse(ok)
+        self.assertEqual(target.read_text(encoding="utf-8"), "{broken")
+
     def test_profile_enables_members_and_disables_others(self):
         config.PROFILES_PATH.write_text(json.dumps({"only-b": ["b"]}), encoding="utf-8")
         ok, msg = config.apply_profile("only-b", config.discover_servers())
@@ -342,6 +385,38 @@ class TestToggleAndProfiles(TempHomeCase):
         ok, msg = config.apply_profile("nope", config.discover_servers())
         self.assertFalse(ok)
         self.assertIn("unknown profile", msg)
+
+    def test_profile_failure_rolls_back_all_prior_changes(self):
+        config.PROFILES_PATH.write_text(json.dumps({"none": []}), encoding="utf-8")
+        original_config = (self.home / ".claude.json").read_text(encoding="utf-8")
+        real_set_enabled = config.set_enabled
+        calls = {"count": 0}
+
+        def fail_second(entry, enabled):
+            calls["count"] += 1
+            if calls["count"] == 2:
+                return False, "simulated failure"
+            return real_set_enabled(entry, enabled)
+
+        with mock.patch.object(config, "set_enabled", side_effect=fail_second):
+            ok, msg = config.apply_profile("none", config.discover_servers())
+        self.assertFalse(ok)
+        self.assertIn("rolled back", msg)
+        self.assertEqual((self.home / ".claude.json").read_text(encoding="utf-8"),
+                         original_config)
+        self.assertFalse(config.DISABLED_PATH.exists())
+
+    def test_cli_enable_takes_backup_before_mutating(self):
+        target = self.home / ".claude.json"
+        original = target.read_text(encoding="utf-8")
+        entry = {"name": "restored", "agent": "claude", "scope": "user",
+                 "origin": "~/.claude.json", "raw": {"command": "node"}}
+        with mock.patch.object(config, "run_cli", return_value=(True, "ok")):
+            ok, _ = config.claude_enable(entry)
+        self.assertTrue(ok)
+        backups = list(self.home.glob(".claude.json.bak-*"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(encoding="utf-8"), original)
 
 
 class TestProcessMatching(unittest.TestCase):
@@ -399,6 +474,16 @@ class TestProcessMatching(unittest.TestCase):
         self.assertEqual(s["instances"], 3)
         self.assertEqual(s["ram_bytes"], 30 * MB)
 
+    def test_shared_process_is_counted_only_once(self):
+        servers = [self.server(key="a"), self.server(key="b", agent="codex")]
+        procs = [{"pid": 60, "ppid": 1, "rss": 100 * MB, "cpu": 2.0,
+                  "cmdline": "node /x/node_modules/@playwright/mcp/index.js"}]
+        probe.measure_usage(servers, procs)
+        self.assertEqual(sum(s["ram_bytes"] for s in servers), 100 * MB)
+        self.assertEqual(sum(s["instances"] for s in servers), 1)
+        self.assertTrue(all(s["process_attribution"] == "shared-estimate"
+                            for s in servers))
+
 
 class TestProbeHandshake(unittest.TestCase):
     SERVER = (
@@ -441,6 +526,33 @@ class TestProbeHandshake(unittest.TestCase):
         self.assertFalse(res["ok"])
         self.assertIn("failed to start", res["error"])
 
+    def test_tools_list_error_is_not_reported_as_success(self):
+        server = (
+            "import json,sys\n"
+            "for line in sys.stdin:\n"
+            " m=json.loads(line)\n"
+            " if m.get('method')=='initialize':\n"
+            "  print(json.dumps({'jsonrpc':'2.0','id':1,'result':{}}),flush=True)\n"
+            " elif m.get('method')=='tools/list':\n"
+            "  print(json.dumps({'jsonrpc':'2.0','id':2,'error':{'code':-1,'message':'no'}}),flush=True)\n")
+        with tempfile.TemporaryDirectory() as td:
+            script = Path(td) / "srv.py"
+            script.write_text(server, encoding="utf-8")
+            result = probe.probe_server({"command": sys.executable,
+                                         "args": [str(script)]}, timeout=10)
+        self.assertFalse(result["ok"])
+        self.assertIn("tools/list failed", result["error"])
+
+    def test_changed_config_marks_cached_probe_stale(self):
+        server = {"key": "k", "raw": {"command": "node", "args": ["one"]}}
+        cache = {"k": {"tools": 4, "tokens": 800, "ms": 10, "error": "",
+                       "at": "2026-08-27T10:00:00",
+                       "config_hash": probe._probe_fingerprint(
+                           {"command": "node", "args": ["different"]})}}
+        probe.attach_probe([server], cache)
+        self.assertTrue(server["probe_stale"])
+        self.assertEqual(server["ctx_tokens"], 0)
+
 
 class TestUsage(unittest.TestCase):
     def write_transcript(self, root, project, records):
@@ -470,11 +582,11 @@ class TestUsage(unittest.TestCase):
             ])
             servers, skills = usage.collect_usage(
                 claude_root=root, codex_root=Path(td) / "none", use_cache=False)
-        self.assertEqual(servers["filesystem"]["calls_30d"], 2)
-        self.assertEqual(servers["playwright"]["calls_30d"], 0)
-        self.assertEqual(servers["playwright"]["calls"], 1)
-        self.assertEqual(servers["filesystem"]["projects"], {"vault": 2})
-        self.assertEqual(servers["filesystem"]["tools"], {"read_file": 2})
+        self.assertEqual(servers["claude::filesystem"]["calls_30d"], 2)
+        self.assertEqual(servers["claude::playwright"]["calls_30d"], 0)
+        self.assertEqual(servers["claude::playwright"]["calls"], 1)
+        self.assertEqual(servers["claude::filesystem"]["projects"], {"vault": 2})
+        self.assertEqual(servers["claude::filesystem"]["tools"], {"read_file": 2})
         self.assertEqual(skills["asv"]["calls_30d"], 1)
         self.assertNotIn("bash", servers)
 
@@ -488,7 +600,7 @@ class TestUsage(unittest.TestCase):
             servers, _ = usage.collect_usage(claude_root=root,
                                              codex_root=Path(td) / "none",
                                              use_cache=False)
-        self.assertEqual(servers["x"]["calls_30d"], 1)
+        self.assertEqual(servers["claude::x"]["calls_30d"], 1)
 
     def test_cache_reuses_unchanged_files(self):
         import datetime
@@ -515,8 +627,50 @@ class TestUsage(unittest.TestCase):
                 usage.parse_claude_file = real
             finally:
                 usage.CACHE_PATH = original
-        self.assertEqual(first["a"]["calls"], second["a"]["calls"])
+        self.assertEqual(first["claude::a"]["calls"],
+                         second["claude::a"]["calls"])
         self.assertEqual(calls["n"], 0, "unchanged transcript was re-parsed")
+
+    def test_same_name_across_agents_is_not_duplicated(self):
+        observed = {
+            "claude::same": {"calls": 7, "calls_30d": 7, "calls_90d": 7,
+                              "last_used": "2026-08-27T00:00:00",
+                              "projects": {}, "tools": {}},
+            "codex::same": {"calls": 3, "calls_30d": 3, "calls_90d": 3,
+                             "last_used": "2026-08-27T00:00:00",
+                             "projects": {}, "tools": {}},
+        }
+        servers = [{"name": "same", "agent": agent, "scope": "user",
+                    "origin": agent, "key": agent} for agent in ("claude", "codex")]
+        usage.attach_usage(servers, observed)
+        self.assertEqual([s["calls_30d"] for s in servers], [7, 3])
+
+    def test_project_usage_is_assigned_to_matching_definition_once(self):
+        bucket = {"calls": 5, "calls_30d": 5, "calls_90d": 5,
+                  "last_used": "2026-08-27T00:00:00",
+                  "projects": {"alpha": 5}, "tools": {"read": 5}}
+        observed = {"claude::fs": {**bucket, "project_usage": {"alpha": bucket}}}
+        servers = [
+            {"name": "fs", "agent": "claude", "scope": "user",
+             "origin": "~/.claude.json", "key": "u"},
+            {"name": "fs", "agent": "claude", "scope": "project",
+             "origin": str(Path("C:/work/alpha/.mcp.json")), "key": "p"},
+        ]
+        usage.attach_usage(servers, observed)
+        self.assertEqual(sum(s["calls_30d"] for s in servers), 5)
+        self.assertEqual(servers[1]["calls_30d"], 5)
+
+    def test_transcript_cwd_preserves_dashed_project_name(self):
+        import datetime
+        now = datetime.datetime.now().isoformat()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "projects"
+            record = self.call("mcp__fs__read", now)
+            record["cwd"] = "C:/work/alpha-beta"
+            self.write_transcript(root, "C--work-alpha-beta", [record])
+            observed, _ = usage.collect_usage(
+                claude_root=root, codex_root=Path(td) / "none", use_cache=False)
+        self.assertEqual(observed["claude::fs"]["projects"], {"alpha-beta": 1})
 
 
 class TestVerdictsAndRecommendations(unittest.TestCase):
@@ -635,7 +789,8 @@ class TestRendering(unittest.TestCase):
                                   {"when": "now", "host": "test"},
                                   live=True, token="safe-nonce")
         self.assertEqual(html.count('nonce="safe-nonce"'), 2)
-        self.assertIn("var MCP_TOKEN = 'safe-nonce';", html)
+        self.assertNotIn("MCP_TOKEN", html)
+        self.assertNotIn("X-MCP-Token", html)
 
     def test_html_is_escaped(self):
         from mcpdash import render
@@ -698,6 +853,30 @@ class TestVaultOutputs(unittest.TestCase):
                                                    path=missing), [])
             self.assertFalse(missing.exists())
 
+    def test_existing_human_directory_note_is_preserved(self):
+        from mcpdash import vaultout
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "directory.md"
+            path.write_text("# My notes\n\nKeep this paragraph.\n", encoding="utf-8")
+            vaultout.write_directory_note(
+                path, {"servers": {}, "last_scan": "2026-08-27T10:00:00"},
+                [], "2026-08-27T10:00:00")
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("Keep this paragraph.", text)
+            self.assertIn(vaultout.NOTE_BEGIN, text)
+
+    def test_incomplete_generated_markers_are_refused(self):
+        from mcpdash import vaultout
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "directory.md"
+            path.write_text("Human text\n" + vaultout.NOTE_BEGIN,
+                            encoding="utf-8")
+            with self.assertRaises(ValueError):
+                vaultout.write_directory_note(
+                    path, {"servers": {}, "last_scan": "2026-08-27T10:00:00"},
+                    [], "2026-08-27T10:00:00")
+            self.assertIn("Human text", path.read_text(encoding="utf-8"))
+
 
 class TestBackupPruning(unittest.TestCase):
     def test_keeps_newest_n_and_spares_manual_backups(self):
@@ -721,6 +900,104 @@ class TestBackupPruning(unittest.TestCase):
             self.assertNotIn("config.json.bak-20260111-120000", ours)
             for m in manual:
                 self.assertTrue(m.exists(), f"{m.name} was pruned")
+
+    def test_rapid_backups_get_unique_names(self):
+        from mcpdash.common import backup_file
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "config.json"
+            target.write_text('{"version": 1}', encoding="utf-8")
+            backup_file(target)
+            target.write_text('{"version": 2}', encoding="utf-8")
+            backup_file(target)
+            backups = sorted(Path(td).glob("config.json.bak-*"))
+            self.assertEqual(len(backups), 2)
+            self.assertNotEqual(backups[0].name, backups[1].name)
+            self.assertEqual({p.read_text(encoding="utf-8") for p in backups},
+                             {'{"version": 1}', '{"version": 2}'})
+
+
+class TestLiveServer(unittest.TestCase):
+    def setUp(self):
+        import mcp_dashboard
+        self.module = mcp_dashboard
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.args = SimpleNamespace(
+            port=0, probe=False, no_cli=True, probe_timeout=5,
+            html=root / "dashboard.html", note=root / "directory.md")
+        self.patches = [
+            mock.patch.object(mcp_dashboard, "scan", return_value=([], {})),
+            mock.patch.object(mcp_dashboard.analysis, "append_history"),
+            mock.patch.object(mcp_dashboard.analysis, "load_history", return_value=[]),
+            mock.patch.object(mcp_dashboard.vaultout, "update_registry",
+                              return_value={"servers": {}}),
+            mock.patch.object(mcp_dashboard.vaultout, "write_directory_note"),
+            mock.patch.object(mcp_dashboard.skills, "discover_skills", return_value=[]),
+            mock.patch.object(mcp_dashboard, "build_page",
+                              return_value=("<html><body>ok</body></html>", [], [])),
+        ]
+        for patcher in self.patches:
+            patcher.start()
+        self.httpd, self.token = mcp_dashboard._make_http_server(
+            self.args, token="test-control-token", nonce="test-script-nonce",
+            cookie_name="mcp_dashboard_test")
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+        self.base = f"http://127.0.0.1:{self.httpd.server_port}"
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join(timeout=5)
+        for patcher in reversed(self.patches):
+            patcher.stop()
+        self.tmp.cleanup()
+
+    def test_get_requires_token_and_sets_security_headers(self):
+        with self.assertRaises(urllib.error.HTTPError) as denied:
+            urllib.request.urlopen(self.base + "/", timeout=5)
+        self.assertEqual(denied.exception.code, 403)
+
+        with urllib.request.urlopen(self.base + "/?t=" + self.token,
+                                    timeout=5) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.headers["X-Frame-Options"], "DENY")
+            self.assertEqual(response.headers["Cache-Control"], "no-store")
+            self.assertIn("nonce-test-script-nonce",
+                          response.headers["Content-Security-Policy"])
+            cookie = response.headers["Set-Cookie"]
+            self.assertIn("HttpOnly", cookie)
+            self.assertIn("SameSite=Strict", cookie)
+
+    def test_post_requires_session_cookie_and_same_origin(self):
+        request = urllib.request.Request(
+            self.base + "/api/toggle", data=b'{"key":"missing"}', method="POST",
+            headers={"Content-Type": "application/json"})
+        with self.assertRaises(urllib.error.HTTPError) as denied:
+            urllib.request.urlopen(request, timeout=5)
+        self.assertEqual(denied.exception.code, 403)
+
+        request = urllib.request.Request(
+            self.base + "/api/toggle", data=b'{"key":"missing"}', method="POST",
+            headers={"Content-Type": "application/json",
+                     "Origin": self.base,
+                     "Cookie": "mcp_dashboard_test=" + self.token})
+        with self.assertRaises(urllib.error.HTTPError) as rejected:
+            urllib.request.urlopen(request, timeout=5)
+        self.assertEqual(rejected.exception.code, 400)
+
+    def test_post_rejects_non_boolean_enabled_value(self):
+        request = urllib.request.Request(
+            self.base + "/api/set",
+            data=b'{"key":"missing","enabled":"false"}', method="POST",
+            headers={"Content-Type": "application/json",
+                     "Origin": self.base,
+                     "Cookie": "mcp_dashboard_test=" + self.token})
+        with self.assertRaises(urllib.error.HTTPError) as rejected:
+            urllib.request.urlopen(request, timeout=5)
+        self.assertEqual(rejected.exception.code, 400)
+        body = json.loads(rejected.exception.read())
+        self.assertIn("boolean", body["message"])
 
 
 class TestAtomicWrite(unittest.TestCase):
