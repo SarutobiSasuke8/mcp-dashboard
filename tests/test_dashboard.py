@@ -153,9 +153,14 @@ class TestSecrets(TempHomeCase):
              "raw": {"env": {"API_TOKEN": "${MY_TOKEN}"}}},
             {"name": "c", "agent": "claude", "origin": "~/.claude.json",
              "raw": {"env": {"LOG_LEVEL": "debug"}}},
+            {"name": "d", "agent": "codex", "origin": "~/.codex/config.toml",
+             "raw": {"env": {"NODE_REPL_NODE_PATH": r"C:\Tools\node.exe",
+                             "GH_PAT": "ghp_abcdef1234567890"}}},
         ]
         found = config.secret_findings(servers)
-        self.assertEqual([f["server"] for f in found], ["a"])
+        self.assertEqual([f["server"] for f in found], ["a", "d"])
+        self.assertEqual([f["var"] for f in found if f["server"] == "d"],
+                         ["GH_PAT"])  # _PATH vars are paths, not secrets
         self.assertNotIn("abcdef123456", json.dumps(found))  # never echoed whole
 
 

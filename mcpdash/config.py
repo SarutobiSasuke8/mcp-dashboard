@@ -21,8 +21,9 @@ VENDOR_PREFIXES = (
     "@base-org/", "@browserbasehq/", "@upstash/", "@vercel/", "@figma/",
 )
 SCRIPT_EXTS = (".py", ".js", ".mjs", ".cjs", ".ts")
+# \b keeps _PAT (personal access token) from matching inside _PATH.
 SECRET_KEY_RE = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|"
-                           r"_PAT|APIKEY|ACCESS)", re.I)
+                           r"_PAT\b|APIKEY|ACCESS)", re.I)
 
 
 # ---------------------------------------------------------------------------
