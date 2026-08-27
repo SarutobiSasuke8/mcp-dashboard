@@ -261,6 +261,14 @@ def serve(args):
 # ---------------------------------------------------------------------------
 
 def main():
+    # Windows consoles often default to a legacy codepage that mangles the
+    # "·" separators in status lines; ask for UTF-8 where the stream allows.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, OSError, ValueError):
+            pass
+
     ap = argparse.ArgumentParser(
         description="MCP Server Dashboard — cost and benefit of your MCP toolbox")
     ap.add_argument("--html", type=Path, default=DEFAULT_HTML)

@@ -1,12 +1,21 @@
 # MCP Dashboard
 
+[![tests](https://github.com/SarutobiSasuke8/mcp-dashboard/actions/workflows/tests.yml/badge.svg)](https://github.com/SarutobiSasuke8/mcp-dashboard/actions/workflows/tests.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Cost and benefit of your MCP toolbox, across **Claude Code, OpenAI Codex,
 Gemini CLI, and Cursor** — what each server costs in RAM, CPU, context
 tokens, and startup time, weighed against how often you actually call it,
 with working on/off switches and a skills directory.
 
+**Zero dependencies.** Python 3.10+ standard library only; `psutil` is an
+optional extra for live CPU sampling. Clone and run.
+
+![MCP Server Dashboard](docs/screenshot.png)
+
 Design record: [DESIGN.md](DESIGN.md) — why, how it measures cost, the
 provenance and verdict rules, and how the control endpoint is secured.
+What's next: [ROADMAP.md](ROADMAP.md).
 
 **Where outputs go:** when the tool sits inside an Obsidian vault (one
 containing an `Obsidian Vault Management/` folder), markdown outputs go to
@@ -40,9 +49,13 @@ python mcp_dashboard.py --demo          # sample data, to preview the visual
 
 Tests: `python -m unittest discover -s tests` (standard library only).
 
-Windows: `python .\mcp_dashboard.py --serve`.
+Windows: use `py mcp_dashboard.py ...` if `python` isn't on your PATH.
 Optional: `pip install psutil` for live CPU sampling (and any CPU reading at
 all on Windows).
+
+**Platforms:** built and battle-tested on Windows; the macOS/Linux paths
+(`ps`-based process matching, POSIX config locations) are implemented and
+unit-tested in CI but have had less real-machine mileage — issues welcome.
 
 ## Views
 
@@ -135,3 +148,15 @@ never grants. Open the URL the command prints; the token is in it.
 2. Move single-project servers to that project's `.mcp.json`.
 3. Prefer remote (HTTP) variants where they exist — zero local RAM.
 4. Close idle sessions; each holds its own copy of every stdio server.
+
+## Safety
+
+Every config edit — including ones routed through the `claude`/`codex`
+CLIs — takes a timestamped backup of the file first, and disabled servers
+are stashed in full so switching them back on is lossless. The test suite
+runs inside a hard sandbox (`Path.home` patched, agent CLIs stubbed) and
+can never touch your real config.
+
+## License
+
+[MIT](LICENSE). Free to use, fork, and build on.

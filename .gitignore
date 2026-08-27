@@ -4,5 +4,6 @@ mcp-disabled.json
 mcp-probe-cache.json
 mcp-usage-cache.json
 output/
+docs/demo.html
 *.bak-*
 __pycache__/
