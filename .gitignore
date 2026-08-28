@@ -7,3 +7,8 @@ output/
 docs/demo.html
 *.bak-*
 __pycache__/
+*.pyc
+*.egg-info/
+.venv/
+build/
+dist/

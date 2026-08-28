@@ -6,14 +6,16 @@ Supports Claude Code (user/local/project scopes), OpenAI Codex
 restored later; every direct file edit takes a timestamped backup first.
 """
 
+import datetime
 import os
 import re
+import secrets
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .common import (DISABLED_PATH, GENERIC_COMMANDS, PROFILES_PATH,
-                     PROVENANCE_PATH, atomic_write, backup_file, load_json,
-                     load_toml, run_cli, save_json)
+                     PROVENANCE_PATH, RECOVERY_DIR, atomic_write, backup_file,
+                     load_json, load_toml, run_cli, save_json)
 
 OFFICIAL_PREFIXES = ("@modelcontextprotocol/",)
 VENDOR_PREFIXES = (
@@ -520,8 +522,87 @@ ENABLERS = {"claude": claude_enable, "codex": codex_enable,
             "gemini": gemini_enable, "cursor": cursor_enable}
 
 
-def set_enabled(entry, enabled):
+def _snapshot(entries):
+    paths = {DISABLED_PATH}
+    paths.update(_config_path(entry) for entry in entries)
+    snapshots = {}
+    for path in paths:
+        try:
+            snapshots[path] = path.read_text(encoding="utf-8")
+        except OSError:
+            snapshots[path] = None
+    return snapshots
+
+
+def _record_recovery(label, snapshots):
+    """Persist one local, single-use undo point for a successful mutation."""
+    RECOVERY_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    path = RECOVERY_DIR / f"{stamp}-{secrets.token_hex(3)}.json"
+    save_json(path, {
+        "version": 1,
+        "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "label": label,
+        "files": [{"path": str(file_path), "existed": text is not None,
+                   "content": text}
+                  for file_path, text in snapshots.items()],
+    })
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    active = sorted(path for path in RECOVERY_DIR.glob("*.json")
+                    if not path.name.endswith(".restored.json"))
+    for old in active[:-10]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return path
+
+
+def latest_recovery():
+    files = sorted((path for path in RECOVERY_DIR.glob("*.json")
+                    if not path.name.endswith(".restored.json")), reverse=True)
+    for path in files:
+        data = load_json(path)
+        if isinstance(data, dict) and isinstance(data.get("files"), list):
+            return path, data
+    return None, None
+
+
+def restore_last_change():
+    """Transactionally restore the newest successful dashboard mutation."""
+    recovery_path, recovery = latest_recovery()
+    if not recovery_path:
+        return False, "no dashboard config change is available to restore"
+    targets = [Path(item["path"]) for item in recovery["files"]
+               if isinstance(item, dict) and isinstance(item.get("path"), str)]
+    current = {}
+    for path in targets:
+        try:
+            current[path] = path.read_text(encoding="utf-8")
+        except OSError:
+            current[path] = None
+    try:
+        for item in recovery["files"]:
+            path = Path(item["path"])
+            if path.exists():
+                backup_file(path)
+            if item.get("existed"):
+                atomic_write(path, item.get("content") or "")
+            elif path.exists():
+                path.unlink()
+    except OSError as exc:
+        _restore_snapshots(current)
+        return False, f"restore failed and current files were retained: {exc}"
+    recovery_path.replace(recovery_path.with_suffix(".restored.json"))
+    return True, f"restored: {recovery.get('label', 'last dashboard change')}"
+
+
+def set_enabled(entry, enabled, record_recovery=True):
     """Enable or disable one server. Returns (ok, message)."""
+    snapshots = _snapshot([entry]) if record_recovery else None
     stash = load_json(DISABLED_PATH) or {}
     key = entry["key"]
     keep = {k: entry[k] for k in ("name", "agent", "scope", "origin", "raw")}
@@ -532,17 +613,49 @@ def set_enabled(entry, enabled):
                           None)
         stashed = stash.get(key) or stash.get(legacy_key) or keep
         stashed = {**stashed, "key": key}
-        ok, msg = ENABLERS[entry["agent"]](stashed)
+        try:
+            ok, msg = ENABLERS[entry["agent"]](stashed)
+        except OSError as exc:
+            errors = _restore_snapshots(snapshots or {})
+            detail = f"enable failed; change rolled back: {exc}"
+            if errors:
+                detail += "; rollback warnings: " + ", ".join(errors)
+            return False, detail
         if ok:
-            stash.pop(key, None)
-            if legacy_key:
-                stash.pop(legacy_key, None)
-            save_json(DISABLED_PATH, stash)
+            try:
+                stash.pop(key, None)
+                if legacy_key:
+                    stash.pop(legacy_key, None)
+                save_json(DISABLED_PATH, stash)
+                if record_recovery:
+                    _record_recovery(f"{entry['name']} enabled", snapshots)
+            except OSError as exc:
+                errors = _restore_snapshots(snapshots or {})
+                detail = f"could not save recovery state; change rolled back: {exc}"
+                if errors:
+                    detail += "; rollback warnings: " + ", ".join(errors)
+                return False, detail
         return ok, msg
-    ok, msg = DISABLERS[entry["agent"]](entry)
+    try:
+        ok, msg = DISABLERS[entry["agent"]](entry)
+    except OSError as exc:
+        errors = _restore_snapshots(snapshots or {})
+        detail = f"disable failed; change rolled back: {exc}"
+        if errors:
+            detail += "; rollback warnings: " + ", ".join(errors)
+        return False, detail
     if ok:
-        stash[key] = keep
-        save_json(DISABLED_PATH, stash)
+        try:
+            stash[key] = keep
+            save_json(DISABLED_PATH, stash)
+            if record_recovery:
+                _record_recovery(f"{entry['name']} disabled", snapshots)
+        except OSError as exc:
+            errors = _restore_snapshots(snapshots or {})
+            detail = f"could not save recovery state; change rolled back: {exc}"
+            if errors:
+                detail += "; rollback warnings: " + ", ".join(errors)
+            return False, detail
     return ok, msg
 
 
@@ -588,23 +701,12 @@ def apply_profile(name, servers):
     if not planned:
         return True, f"profile '{name}' already applied"
 
-    snapshots = {}
-    for s in planned:
-        path = _config_path(s)
-        if path not in snapshots:
-            try:
-                snapshots[path] = path.read_text(encoding="utf-8")
-            except OSError:
-                snapshots[path] = None
-    try:
-        snapshots[DISABLED_PATH] = DISABLED_PATH.read_text(encoding="utf-8")
-    except OSError:
-        snapshots[DISABLED_PATH] = None
+    snapshots = _snapshot(planned)
 
     changed = []
     for s in planned:
         should = s["name"].lower() in wanted
-        ok, msg = set_enabled(s, should)
+        ok, msg = set_enabled(s, should, record_recovery=False)
         label = f"{s['name']} {'on' if should else 'off'}"
         if not ok:
             rollback_errors = _restore_snapshots(snapshots)
@@ -613,6 +715,14 @@ def apply_profile(name, servers):
                 detail += "; rollback warnings: " + ", ".join(rollback_errors)
             return False, detail
         changed.append(label)
+    try:
+        _record_recovery(f"profile '{name}'", snapshots)
+    except OSError as exc:
+        rollback_errors = _restore_snapshots(snapshots)
+        detail = f"could not save profile recovery point; changes rolled back: {exc}"
+        if rollback_errors:
+            detail += "; rollback warnings: " + ", ".join(rollback_errors)
+        return False, detail
     return True, "changed: " + ", ".join(changed)
 
 

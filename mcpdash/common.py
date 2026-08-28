@@ -6,11 +6,43 @@ import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
 PKG_DIR = Path(__file__).resolve().parent
 SCRIPT_DIR = PKG_DIR.parent
+
+
+def _app_dirs():
+    """Return platform-native config, state, and cache directories.
+
+    ``MCP_DASHBOARD_HOME`` intentionally collapses them beneath one root for
+    portable installs and deterministic tests. Runtime data must never be
+    written into site-packages, which may be read-only and is removed during
+    upgrades or uninstall.
+    """
+    override = os.environ.get("MCP_DASHBOARD_HOME")
+    if override:
+        root = Path(override).expanduser()
+        return root / "config", root / "state", root / "cache"
+    home = Path.home()
+    system = platform.system()
+    if system == "Windows":
+        roaming = Path(os.environ.get("APPDATA", home / "AppData" / "Roaming"))
+        local = Path(os.environ.get("LOCALAPPDATA", home / "AppData" / "Local"))
+        return (roaming / "mcp-dashboard", local / "mcp-dashboard" / "state",
+                local / "mcp-dashboard" / "cache")
+    if system == "Darwin":
+        support = home / "Library" / "Application Support" / "mcp-dashboard"
+        return support, support / "state", home / "Library" / "Caches" / "mcp-dashboard"
+    config = Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
+    state = Path(os.environ.get("XDG_STATE_HOME", home / ".local" / "state"))
+    cache = Path(os.environ.get("XDG_CACHE_HOME", home / ".cache"))
+    return config / "mcp-dashboard", state / "mcp-dashboard", cache / "mcp-dashboard"
+
+
+CONFIG_DIR, STATE_DIR, CACHE_DIR = _app_dirs()
 
 
 def _find_vault_root():
@@ -23,9 +55,10 @@ def _find_vault_root():
     override = os.environ.get("MCP_DASHBOARD_VAULT")
     if override:
         return Path(override).expanduser()
-    for parent in SCRIPT_DIR.parents:
-        if (parent / "Obsidian Vault Management").is_dir():
-            return parent
+    candidates = [Path.cwd(), *Path.cwd().parents, SCRIPT_DIR, *SCRIPT_DIR.parents]
+    for candidate in candidates:
+        if (candidate / "Obsidian Vault Management").is_dir():
+            return candidate
     return None
 
 
@@ -35,20 +68,32 @@ if IN_VAULT:
     SYSTEMS_DIR = VAULT_ROOT / "Obsidian Vault Management" / "Systems"
     TASKS_INBOX = VAULT_ROOT / "Tasks" / "Inbox.md"
 else:
-    VAULT_ROOT = SCRIPT_DIR
-    SYSTEMS_DIR = SCRIPT_DIR / "output"
-    TASKS_INBOX = SCRIPT_DIR / "output" / "Inbox.md"
+    VAULT_ROOT = Path.cwd()
+    SYSTEMS_DIR = STATE_DIR / "reports"
+    TASKS_INBOX = SYSTEMS_DIR / "Inbox.md"
 
 DEFAULT_HTML = SYSTEMS_DIR / "MCP Server Dashboard.html"
 DEFAULT_NOTE = SYSTEMS_DIR / "MCP Directory.md"
 WEEKLY_NOTE = SYSTEMS_DIR / "MCP Usage Report.md"
 
-REGISTRY_PATH = SCRIPT_DIR / "mcp-registry.json"
-HISTORY_PATH = SCRIPT_DIR / "mcp-history.jsonl"
-DISABLED_PATH = SCRIPT_DIR / "mcp-disabled.json"
-PROVENANCE_PATH = SCRIPT_DIR / "mcp-provenance.json"
-PROFILES_PATH = SCRIPT_DIR / "mcp-profiles.json"
-PROBE_CACHE_PATH = SCRIPT_DIR / "mcp-probe-cache.json"
+REGISTRY_PATH = STATE_DIR / "mcp-registry.json"
+HISTORY_PATH = STATE_DIR / "mcp-history.jsonl"
+DISABLED_PATH = STATE_DIR / "mcp-disabled.json"
+PROVENANCE_PATH = CONFIG_DIR / "mcp-provenance.json"
+PROFILES_PATH = CONFIG_DIR / "mcp-profiles.json"
+PROBE_CACHE_PATH = CACHE_DIR / "mcp-probe-cache.json"
+USAGE_CACHE_PATH = CACHE_DIR / "mcp-usage-cache.json"
+RECOVERY_DIR = STATE_DIR / "recovery"
+
+LEGACY_PATHS = {
+    REGISTRY_PATH: SCRIPT_DIR / "mcp-registry.json",
+    HISTORY_PATH: SCRIPT_DIR / "mcp-history.jsonl",
+    DISABLED_PATH: SCRIPT_DIR / "mcp-disabled.json",
+    PROVENANCE_PATH: SCRIPT_DIR / "mcp-provenance.json",
+    PROFILES_PATH: SCRIPT_DIR / "mcp-profiles.json",
+    PROBE_CACHE_PATH: SCRIPT_DIR / "mcp-probe-cache.json",
+    USAGE_CACHE_PATH: SCRIPT_DIR / "mcp-usage-cache.json",
+}
 
 HISTORY_LIMIT = 60
 
@@ -75,15 +120,42 @@ def atomic_write(path, text):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+    except OSError:
+        mode = 0o600
     with open(tmp, "w", encoding="utf-8") as fh:
         fh.write(text)
         fh.flush()
         os.fsync(fh.fileno())
+    try:
+        tmp.chmod(mode)
+    except OSError:
+        pass
     os.replace(tmp, path)
 
 
 def save_json(path, data):
     atomic_write(path, json.dumps(data, indent=2))
+
+
+def migrate_legacy_state():
+    """Copy source-checkout state into v1 user directories once.
+
+    Existing files always win and legacy files are deliberately left in place
+    so the migration is reversible. Returns the copied destination paths.
+    """
+    copied = []
+    for destination, legacy in LEGACY_PATHS.items():
+        if destination.exists() or not legacy.is_file():
+            continue
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(legacy, destination)
+            copied.append(destination)
+        except OSError:
+            continue
+    return copied
 
 
 def parse_ts(value):
@@ -195,7 +267,7 @@ def backup_file(path, keep=BACKUP_KEEP):
     pruned — a user's hand-made .bak files are left alone."""
     path = Path(path)
     if not path.exists():
-        return
+        return None
     # Microseconds prevent two rapid mutations (or a CLI fallback in the
     # same second) from overwriting the only pristine recovery point.
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
@@ -208,6 +280,7 @@ def backup_file(path, keep=BACKUP_KEEP):
             old.unlink()
         except OSError:
             pass
+    return destination
 
 
 def esc(s):

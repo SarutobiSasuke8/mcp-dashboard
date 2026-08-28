@@ -19,11 +19,11 @@ import json
 import re
 from pathlib import Path
 
-from .common import SCRIPT_DIR, load_json, parse_ts, save_json
+from .common import USAGE_CACHE_PATH, load_json, parse_ts, save_json
 
 MCP_NAME_RE = re.compile(r"^mcp__([^_].*?)__(.+)$")
 CODEX_NAME_RE = re.compile(r'"name"\s*:\s*"(?:mcp__)?([\w.-]+?)__([\w.-]+)"')
-CACHE_PATH = SCRIPT_DIR / "mcp-usage-cache.json"
+CACHE_PATH = USAGE_CACHE_PATH
 CACHE_VERSION = 3
 CODEX_SKIP = {"function", "type", "shell", "local", "apply", "container"}
 

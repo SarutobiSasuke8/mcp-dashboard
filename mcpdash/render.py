@@ -414,10 +414,11 @@ def render_html(servers, skills, history, recs, secrets, shadowed, meta,
         state = "on" if s.get("enabled", True) else "off"
         if live:
             return (f'<button class="switch {state}" data-key="{esc(s["key"])}" '
+                    f'data-name="{esc(s["name"])}" '
                     f'role="switch" aria-checked="{"true" if state == "on" else "false"}" '
                     f'aria-label="Toggle {esc(s["name"])}"><i></i></button>')
         return (f'<span class="switch {state} static" title="Toggles work in live '
-                f'mode: python mcp_dashboard.py --serve"><i></i></span>')
+                f'mode: mcp-dashboard open"><i></i></span>')
 
     def prov_chip(s):
         cls, label = PROV_META.get(s.get("provenance", "unknown"),
@@ -532,6 +533,10 @@ def render_html(servers, skills, history, recs, secrets, shadowed, meta,
         prof_html = (f'<section><h2>Profiles <span class="hint">— apply a set, '
                      f'disable everything else</span></h2><div class="card">'
                      f'<div class="profiles">{"".join(btns)}</div></div></section>')
+    undo_html = (('<section><h2>Recovery <span class="hint">— restore the files '
+                  'from the most recent successful dashboard change</span></h2>'
+                  '<div class="card"><button class="btn" data-restore-last>'
+                  'Undo last config change</button></div></section>') if live else "")
 
     usage_rows = [(f"{s['name']}", s.get("calls_30d", 0), "")
                   for s in sorted(servers, key=lambda s: -s.get("calls_30d", 0))[:10]
@@ -607,11 +612,15 @@ function post(url, body, btn) {
 }
 document.querySelectorAll('button.switch').forEach(function (btn) {
   btn.addEventListener('click', function () {
+    var action = btn.getAttribute('aria-checked') === 'true' ? 'switch off' : 'switch on';
+    if (!confirm('Confirm: ' + action + ' "' + btn.dataset.name + '"? '
+                 + 'A local recovery point will be created.')) return;
     post('/api/toggle', {key: btn.dataset.key}, btn);
   });
 });
 document.querySelectorAll('button[data-act="off"]').forEach(function (btn) {
   btn.addEventListener('click', function () {
+    if (!confirm('Confirm: switch off this server? A local recovery point will be created.')) return;
     post('/api/set', {key: btn.dataset.key, enabled: false}, btn);
   });
 });
@@ -622,6 +631,13 @@ document.querySelectorAll('button[data-profile]').forEach(function (btn) {
     post('/api/profile', {name: btn.dataset.profile}, btn);
   });
 });
+document.querySelectorAll('button[data-restore-last]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    if (!confirm('Restore the files from the most recent MCP Dashboard config change? '
+                 + 'Current files will be backed up first.')) return;
+    post('/api/restore', {}, btn);
+  });
+});
 </script>""".replace("__NONCE__", nonce_attr)
 
     cpu_note = ("a live sample" if meta.get("psutil")
@@ -629,6 +645,9 @@ document.querySelectorAll('button[data-profile]').forEach(function (btn) {
     probe_note = (f"probed {meta.get('probe_at', '')[:16].replace('T', ' ')}"
                   if meta.get("probe_at") else
                   "run with <code>--probe</code> to measure context cost and startup time")
+    usage_note = ("Usage collection is disabled for this run"
+                  if meta.get("usage_disabled") else
+                  "Usage comes from your Claude Code and Codex transcripts")
 
     return f"""<!doctype html>
 <html lang="en">
@@ -647,7 +666,7 @@ document.querySelectorAll('button[data-profile]').forEach(function (btn) {
       <div class="brandmark" aria-hidden="true">MCP</div>
       <div>
         <h1>MCP Server Dashboard</h1>
-        <div class="sub">scanned {esc(meta['when'])} &middot; host {esc(meta['host'])}{' &middot; LIVE' if live else ''}{' &middot; DEMO DATA' if meta.get('demo') else ''}</div>
+        <div class="sub">v{esc(meta.get('version', 'dev'))} &middot; scanned {esc(meta['when'])} &middot; host {esc(meta['host'])}{' &middot; LIVE' if live else ''}{' &middot; DEMO DATA' if meta.get('demo') else ''}</div>
       </div>
     </div>
     <div class="header-actions">
@@ -729,6 +748,7 @@ document.querySelectorAll('button[data-profile]').forEach(function (btn) {
   </section>
 
   {prof_html}
+  {undo_html}
 
   <section>
     <h2>Most used servers (30 days)</h2>
@@ -778,15 +798,14 @@ document.querySelectorAll('button[data-profile]').forEach(function (btn) {
       <p>Each <strong>stdio</strong> server is a real OS process spawned per agent
       session &mdash; three open sessions run every stdio server three times.
       Context cost is the tool schemas a server injects into every request;
-      {probe_note}. CPU is {cpu_note}. Usage comes from your Claude Code and
-      Codex transcripts. Provenance:
+      {probe_note}. CPU is {cpu_note}. {usage_note}. Provenance:
       <span class="prov-self">yours</span> means a server you built. Switching a
       server off stashes its config; running sessions keep their processes until
       restarted.</p>
     </details>
     <div class="footline"><span>Local-first &middot; dependency-free &middot; MIT licensed</span>
-      <span>Regenerate: <code>python mcp_dashboard.py --open</code> &middot;
-      live control: <code>python mcp_dashboard.py --serve</code></span></div>
+      <span>Regenerate: <code>mcp-dashboard --open</code> &middot;
+      live control: <code>mcp-dashboard open</code></span></div>
   </footer>
 </main>
 <script{nonce_attr}>

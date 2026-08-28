@@ -23,6 +23,7 @@ Outputs land in Obsidian Vault Management/Systems/; machine-local state
 import argparse
 import datetime
 import json
+import os
 import platform
 import secrets
 import sys
@@ -31,14 +32,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from mcpdash import analysis, config, probe, render, skills, usage, vaultout  # noqa: E402
+from mcpdash import analysis, config, doctor, probe, render, skills, usage, vaultout  # noqa: E402
+from mcpdash import __version__  # noqa: E402
 from mcpdash.common import (DEFAULT_HTML, DEFAULT_NOTE, DISABLED_PATH,  # noqa: E402
-                            PROBE_CACHE_PATH, PROVENANCE_PATH, atomic_write, fmt_mb,
-                            has_psutil, load_json, save_json)
+                            PROBE_CACHE_PATH, PROVENANCE_PATH, atomic_write,
+                            fmt_mb, has_psutil, load_json,
+                            migrate_legacy_state, save_json)
 from mcpdash.demo import demo_data  # noqa: E402
 
 
 def ensure_side_files():
+    migrated = migrate_legacy_state()
+    if migrated:
+        print("Migrated existing dashboard state to user storage:")
+        for path in migrated:
+            print(f"  {path}")
     if not PROVENANCE_PATH.exists():
         save_json(PROVENANCE_PATH, {
             "_help": ("Label server provenance here; keys are server names. "
@@ -49,7 +57,7 @@ def ensure_side_files():
     config.load_profiles()  # writes defaults on first run
 
 
-def scan(use_cli=True, do_probe=False, probe_timeout=25):
+def scan(use_cli=True, do_probe=False, probe_timeout=25, include_usage=True):
     """Full scan: config, processes, usage, probe cache, verdicts.
 
     Returns (servers, skill_usage) — transcripts are parsed once per run and
@@ -60,7 +68,10 @@ def scan(use_cli=True, do_probe=False, probe_timeout=25):
     if do_probe:
         probe.probe_all(servers, timeout=probe_timeout)
     probe.attach_probe(servers)
-    server_usage, skill_usage = usage.collect_usage()
+    if include_usage:
+        server_usage, skill_usage = usage.collect_usage()
+    else:
+        server_usage, skill_usage = {}, {}
     usage.attach_usage(servers, server_usage)
 
     for s in servers:
@@ -224,7 +235,8 @@ def _make_http_server(args, token=None, nonce=None, cookie_name=None):
             do_probe = args.probe and not state.get("probed")
             servers, skill_usage = scan(use_cli=not args.no_cli,
                                         do_probe=do_probe,
-                                        probe_timeout=args.probe_timeout)
+                                        probe_timeout=args.probe_timeout,
+                                        include_usage=not getattr(args, "no_usage", False))
             state["servers"] = servers
             state["probed"] = True
             analysis.append_history(servers, now_iso)
@@ -233,7 +245,9 @@ def _make_http_server(args, token=None, nonce=None, cookie_name=None):
             cache = load_json(PROBE_CACHE_PATH) or {}
             meta = {"when": now.strftime("%Y-%m-%d %H:%M"),
                     "host": platform.node() or platform.system(),
+                    "version": __version__,
                     "psutil": has_psutil(),
+                    "usage_disabled": getattr(args, "no_usage", False),
                     "probe_at": max((v.get("at", "") for v in cache.values()),
                                     default="")}
             html, _, _ = build_page(servers, skills.discover_skills(),
@@ -273,6 +287,8 @@ def _make_http_server(args, token=None, nonce=None, cookie_name=None):
                         raise ValueError("name must be a non-empty string")
                     ok, msg = config.apply_profile(name,
                                                    state["servers"])
+                elif path == "/api/restore":
+                    ok, msg = config.restore_last_change()
                 else:
                     self._send(404, "{}", "application/json")
                     return
@@ -295,7 +311,7 @@ def _make_http_server(args, token=None, nonce=None, cookie_name=None):
 def serve(args):
     """Run the local control surface until interrupted."""
     httpd, token = _make_http_server(args)
-    url = f"http://127.0.0.1:{args.port}/?t={token}"
+    url = f"http://127.0.0.1:{httpd.server_port}/?t={token}"
     print(f"Live dashboard at {url}  (Ctrl+C to stop)")
     print(f"Toggles and profiles edit real config; disabled servers are stashed "
           f"in {DISABLED_PATH.name} so they can be switched back on.")
@@ -322,11 +338,19 @@ def main():
 
     ap = argparse.ArgumentParser(
         description="MCP Server Dashboard — cost and benefit of your MCP toolbox")
+    ap.add_argument("--version", action="version",
+                    version=f"MCP Dashboard {__version__}")
+    ap.add_argument("--doctor", action="store_true",
+                    help="check Python, storage, port, optional features, and agent CLIs")
     ap.add_argument("--html", type=Path, default=DEFAULT_HTML)
     ap.add_argument("--note", type=Path, default=DEFAULT_NOTE)
     ap.add_argument("--demo", action="store_true", help="render sample data")
     ap.add_argument("--no-cli", action="store_true",
                     help="skip the `claude mcp list` health check (faster)")
+    ap.add_argument("--no-usage", action="store_true",
+                    default=os.environ.get("MCP_DASHBOARD_NO_USAGE", "").lower()
+                    in {"1", "true", "yes", "on"},
+                    help="do not read Claude Code or Codex transcripts")
     ap.add_argument("--probe", action="store_true",
                     help="start each server briefly to measure tool count, "
                          "context tokens, startup time, and real errors")
@@ -341,13 +365,32 @@ def main():
     ap.add_argument("--profile", metavar="NAME",
                     help="apply a profile from mcp-profiles.json and exit")
     ap.add_argument("--list-profiles", action="store_true")
+    ap.add_argument("--restore-last", action="store_true",
+                    help="restore files from the most recent dashboard config change")
     ap.add_argument("--json", type=Path, metavar="PATH", dest="json_path",
                     help="also write a machine-readable snapshot (nested "
                          "credential values redacted) for other tools")
     ap.add_argument("--open", action="store_true", help="open in a browser")
-    args = ap.parse_args()
+    argv = sys.argv[1:]
+    if argv[:1] == ["open"]:
+        argv = ["--serve", "--open", *argv[1:]]
+    elif argv[:1] == ["scan"]:
+        argv = argv[1:]
+    args = ap.parse_args(argv)
+
+    if args.doctor:
+        if not doctor.run(args.port, args.html, args.note):
+            raise SystemExit(1)
+        return
 
     ensure_side_files()
+
+    if args.restore_last:
+        ok, msg = config.restore_last_change()
+        print(msg)
+        if not ok:
+            raise SystemExit(1)
+        return
 
     if args.list_profiles:
         for name, members in sorted(config.load_profiles().items()):
@@ -355,7 +398,7 @@ def main():
         return
 
     if args.profile:
-        servers, _ = scan(use_cli=False)
+        servers, _ = scan(use_cli=False, include_usage=not args.no_usage)
         ok, msg = config.apply_profile(args.profile, servers)
         print(("Applied" if ok else "Failed to apply") +
               f" profile '{args.profile}': {msg}")
@@ -371,7 +414,9 @@ def main():
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%S")
     meta = {"when": now.strftime("%Y-%m-%d %H:%M"),
             "host": platform.node() or platform.system(),
-            "demo": args.demo, "psutil": has_psutil()}
+            "version": __version__,
+            "demo": args.demo, "psutil": has_psutil(),
+            "usage_disabled": args.no_usage}
 
     if args.demo:
         servers, skill_list, history, meta_extra = demo_data()
@@ -387,7 +432,8 @@ def main():
             print("Probing servers (starting each one briefly)…")
         servers, skill_usage = scan(use_cli=not args.no_cli,
                                     do_probe=args.probe,
-                                    probe_timeout=args.probe_timeout)
+                                    probe_timeout=args.probe_timeout,
+                                    include_usage=not args.no_usage)
         by_agent = {}
         for s in servers:
             by_agent[s["agent"]] = by_agent.get(s["agent"], 0) + 1

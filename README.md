@@ -1,27 +1,39 @@
 # MCP Dashboard
 
 [![tests](https://github.com/SarutobiSasuke8/mcp-dashboard/actions/workflows/tests.yml/badge.svg)](https://github.com/SarutobiSasuke8/mcp-dashboard/actions/workflows/tests.yml)
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/LICENSE)
+[![status: v1 release candidate](https://img.shields.io/badge/status-v1_release_candidate-7c3aed.svg)](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/ROADMAP.md)
+
+![MCP Dashboard — local AI tool cost and usage control](https://raw.githubusercontent.com/SarutobiSasuke8/mcp-dashboard/main/docs/mcp-dashboard-hero.png)
 
 Cost and benefit of your MCP toolbox, across **Claude Code, OpenAI Codex,
 Gemini CLI, and Cursor** — what each server costs in RAM, CPU, context
 tokens, and startup time, weighed against how often you actually call it,
 with working on/off switches and a skills directory.
 
-**Zero dependencies and no remote UI assets.** Python 3.10+ standard library
-only; `psutil` is an optional extra for live CPU sampling. Clone and run.
+**Zero required runtime dependencies and no remote UI assets.** Python 3.10+
+standard library only; `psutil` is an optional extra for live CPU sampling.
+The installable v1 package, isolated state, diagnostics, recovery controls, and
+release automation are implemented. The repository remains a **v1 release
+candidate** until the cross-platform release checklist and first tagged
+publication are completed.
 
-![MCP Server Dashboard](docs/screenshot.png)
+<details>
+<summary><strong>See the dashboard</strong></summary>
 
-Design record: [DESIGN.md](DESIGN.md) — why, how it measures cost, the
+![MCP Server Dashboard](https://raw.githubusercontent.com/SarutobiSasuke8/mcp-dashboard/main/docs/screenshot.png)
+
+</details>
+
+Design record: [DESIGN.md](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/DESIGN.md) — why, how it measures cost, the
 provenance and verdict rules, and how the control endpoint is secured.
-What's next: [ROADMAP.md](ROADMAP.md).
+What's next: [ROADMAP.md](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/ROADMAP.md).
 
-**Where outputs go:** when the tool sits inside an Obsidian vault (one
-containing an `Obsidian Vault Management/` folder), markdown outputs go to
-that vault's `Systems/` folder; run standalone, they go to `output/` next to
-the script instead. Point it anywhere with `MCP_DASHBOARD_VAULT` or the
-`--html` / `--note` flags.
+**Where outputs go:** inside an Obsidian vault, Markdown outputs go to its
+`Obsidian Vault Management/Systems/` folder. Otherwise reports, state, cache,
+profiles, and recovery points use platform-native user directories—never
+site-packages. Override the application home with `MCP_DASHBOARD_HOME`, the
+vault with `MCP_DASHBOARD_VAULT`, or individual outputs with `--html`/`--note`.
 
 ## Why
 
@@ -31,36 +43,66 @@ three open sessions run every stdio server three times. Remote connectors
 cost no local RAM but still inject tool schemas into every request. So the
 question is never RAM alone: it is cost versus use.
 
-## Quickstart
+## Install and start in 60 seconds
 
+Prerequisite: Python 3.10+. No API key is needed. After v1 is published:
+
+```bash
+pipx install mcp-dashboard
+mcp-dashboard --doctor
+mcp-dashboard open --probe
 ```
-git clone https://github.com/SarutobiSasuke8/mcp-dashboard.git
-cd mcp-dashboard
-python mcp_dashboard.py --probe --open     # first run: fills in context cost
-python mcp_dashboard.py --serve            # then act on the Advisor tab
-```
+
+Until the first PyPI publication, install the release candidate directly from
+GitHub with `pipx install git+https://github.com/SarutobiSasuke8/mcp-dashboard.git`,
+or use the source workflow in the [onboarding guide](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/docs/GETTING_STARTED.md).
+
+That command discovers local MCP configuration, briefly probes enabled stdio
+servers, starts the authenticated dashboard at `127.0.0.1:7817`, and opens the
+correct one-time URL in your browser. Keep the terminal open while using live
+switches; press `Ctrl+C` to stop it. The first probe can take a little longer
+because each server is started once.
+
+For a faster read-only first look, run `mcp-dashboard --open`. See the complete
+[installation and onboarding guide](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/docs/GETTING_STARTED.md), including source
+installation, privacy choices, migration, troubleshooting, and scheduled scans.
+
+> Do not bookmark the tokenized live URL: a fresh local security token is
+> generated on every run. Reopen the dashboard with the command above.
 
 ## Usage
 
-```
-python mcp_dashboard.py                 # scan, write dashboard + directory note
-python mcp_dashboard.py --open          # ...and open it in a browser
-python mcp_dashboard.py --serve         # LIVE at 127.0.0.1:7817, toggles work
-python mcp_dashboard.py --probe         # also measure context cost + startup
-python mcp_dashboard.py --report        # append a snapshot to the vault report
-python mcp_dashboard.py --tasks         # file high-severity findings as tasks
-python mcp_dashboard.py --profile coding    # apply a named server set
-python mcp_dashboard.py --list-profiles
-python mcp_dashboard.py --json out.json # machine-readable snapshot (credentials redacted)
-python mcp_dashboard.py --no-cli        # skip `claude mcp list` (faster)
-python mcp_dashboard.py --demo          # sample data, to preview the visual
+```bash
+mcp-dashboard open                  # live dashboard + browser (recommended)
+mcp-dashboard open --probe          # also refresh context/startup measurements
+mcp-dashboard scan                  # write a static dashboard + directory note
+mcp-dashboard --open                # static report and open it
+mcp-dashboard --report              # append a usage snapshot
+mcp-dashboard --tasks               # file high-severity findings as tasks
+mcp-dashboard --profile coding      # apply a named server set
+mcp-dashboard --list-profiles
+mcp-dashboard --restore-last        # undo the most recent dashboard config change
+mcp-dashboard --no-usage            # do not read agent transcripts
+mcp-dashboard --json out.json       # recursively redacted machine-readable snapshot
+mcp-dashboard --demo --open         # preview safe sample data
 ```
 
-Tests: `python -m unittest discover -s tests` (standard library only; 62 tests).
+### Everyday opening flow
 
-Windows: use `py mcp_dashboard.py ...` if `python` isn't on your PATH.
-Optional: `pip install psutil` for live CPU sampling (and any CPU reading at
-all on Windows).
+The memorable command is:
+
+```bash
+mcp-dashboard open
+```
+
+Use `--probe` when server definitions change or you want fresh startup/context
+measurements; ordinary live opens can omit it. Use `--open` without `--serve`
+for a static report whose controls are intentionally disabled.
+
+Tests: `python -m unittest discover -s tests` (standard library only; 73 tests).
+
+Optional: `pipx inject mcp-dashboard psutil` for live CPU sampling (and any CPU
+reading at all on Windows).
 
 **Platforms:** built and battle-tested on Windows; the macOS/Linux paths
 (`ps`-based process matching, POSIX config locations) are implemented and
@@ -132,7 +174,8 @@ with a timestamped backup as fallback) and stashes it in
 a named set and disable everything else, across all agents at once. Changes
 apply to **new** sessions. Profile changes are transactional: if any mutation
 fails, the affected config and stash files are restored to their pre-profile
-state.
+state. Live changes require confirmation and create a local single-use recovery
+point; use the Advisor's recovery button or `mcp-dashboard --restore-last`.
 
 Because this endpoint edits real config, it binds to loopback only, rejects a
 non-loopback `Host` (blocking DNS rebinding), and requires a per-run token —
@@ -156,14 +199,15 @@ visible URL once the page initializes.
 | File | What |
 | --- | --- |
 | `mcp_dashboard.py`, `mcpdash/` | The tool |
-| `mcp-provenance.json` | Your provenance labels (committed) |
-| `mcp-profiles.json` | Your named server sets (committed) |
+| `pyproject.toml` | Package metadata and `mcp-dashboard` console entry point |
+| `mcp-provenance.json` | Source-checkout seed for user provenance labels |
+| `mcp-profiles.json` | Source-checkout seed for named server sets |
 | `Register-MCPDashboardScan.ps1` | Scheduled-task registration |
-| `tests/` | Test suite (`python -m unittest discover -s tests`) |
+| `tests/`, `scripts/` | Tests and installed-wheel/release verification |
 | `<outputs>/MCP Server Dashboard.html` | Generated dashboard |
 | `<outputs>/MCP Directory.md` | Living registry note |
 | `<outputs>/MCP Usage Report.md` | Rolling snapshots (`--report`) |
-| `mcp-registry.json`, `mcp-history.jsonl`, `mcp-probe-cache.json`, `mcp-usage-cache.json`, `mcp-disabled.json` | Machine-local state (gitignored) |
+| Platform config/state/cache directories | Profiles, provenance, registry, history, caches, disabled stash, and recovery points |
 
 ## Trimming RAM
 
@@ -182,6 +226,23 @@ command arguments, authenticated URLs, query parameters, and vendor-specific
 config blocks. The test suite runs inside a hard sandbox
 (`Path.home` patched, agent CLIs stubbed) and can never touch your real config.
 
+The tool reads local agent configuration and transcript metadata to calculate
+usage. It does not send that data anywhere. Generated reports can contain
+server names, project names, and local paths, so review them before sharing.
+Disable transcript reading with `--no-usage` or
+`MCP_DASHBOARD_NO_USAGE=1`.
+See [SECURITY.md](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/SECURITY.md) for the security model and private reporting
+instructions.
+
+## Contributing and release status
+
+Bug reports and focused pull requests are welcome; start with
+[CONTRIBUTING.md](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/CONTRIBUTING.md). The codebase is a packaged v1 release
+candidate; publication still depends on the maintainer-owned administration,
+cross-platform evidence, and tag gates in [ROADMAP.md](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/ROADMAP.md) and the
+[release checklist](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/docs/RELEASE_CHECKLIST.md). See [CHANGELOG.md](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/CHANGELOG.md)
+for versioned changes.
+
 ## License
 
-[MIT](LICENSE). Free to use, fork, and build on.
+[MIT](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/LICENSE). Free to use, fork, and build on.

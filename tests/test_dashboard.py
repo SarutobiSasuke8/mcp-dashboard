@@ -74,6 +74,8 @@ class TempHomeCase(unittest.TestCase):
             for name in names:
                 self._patched[(mod, name)] = getattr(mod, name)
                 setattr(mod, name, self.root / f"{name.lower()}.json")
+        self._patched[(config, "RECOVERY_DIR")] = config.RECOVERY_DIR
+        config.RECOVERY_DIR = self.root / "recovery"
 
     def tearDown(self):
         for (mod, name), value in self._patched.items():
@@ -352,6 +354,34 @@ class TestToggleAndProfiles(TempHomeCase):
         cfg = json.loads((self.home / ".claude.json").read_text(encoding="utf-8"))
         self.assertEqual(cfg["mcpServers"]["a"]["args"], ["/a.js"])
 
+    def test_last_change_can_be_restored_once(self):
+        original = (self.home / ".claude.json").read_text(encoding="utf-8")
+        entry = next(s for s in config.discover_servers() if s["name"] == "a")
+        ok, msg = config.set_enabled(entry, False)
+        self.assertTrue(ok, msg)
+        self.assertTrue(list(config.RECOVERY_DIR.glob("*.json")))
+
+        ok, msg = config.restore_last_change()
+        self.assertTrue(ok, msg)
+        self.assertEqual((self.home / ".claude.json").read_text(encoding="utf-8"),
+                         original)
+        self.assertFalse(config.DISABLED_PATH.exists())
+        ok, msg = config.restore_last_change()
+        self.assertFalse(ok)
+        self.assertIn("no dashboard config change", msg)
+
+    def test_recovery_write_failure_rolls_back_individual_change(self):
+        original = (self.home / ".claude.json").read_text(encoding="utf-8")
+        entry = next(s for s in config.discover_servers() if s["name"] == "a")
+        with mock.patch.object(config, "_record_recovery",
+                               side_effect=OSError("disk full")):
+            ok, msg = config.set_enabled(entry, False)
+        self.assertFalse(ok)
+        self.assertIn("rolled back", msg)
+        self.assertEqual((self.home / ".claude.json").read_text(encoding="utf-8"),
+                         original)
+        self.assertFalse(config.DISABLED_PATH.exists())
+
     def test_direct_config_edit_backs_up_first(self):
         # The CLI path manages its own config; this covers the fallback that
         # edits the file ourselves, which must never write without a backup.
@@ -392,11 +422,11 @@ class TestToggleAndProfiles(TempHomeCase):
         real_set_enabled = config.set_enabled
         calls = {"count": 0}
 
-        def fail_second(entry, enabled):
+        def fail_second(entry, enabled, **kwargs):
             calls["count"] += 1
             if calls["count"] == 2:
                 return False, "simulated failure"
-            return real_set_enabled(entry, enabled)
+            return real_set_enabled(entry, enabled, **kwargs)
 
         with mock.patch.object(config, "set_enabled", side_effect=fail_second):
             ok, msg = config.apply_profile("none", config.discover_servers())
@@ -999,6 +1029,19 @@ class TestLiveServer(unittest.TestCase):
         body = json.loads(rejected.exception.read())
         self.assertIn("boolean", body["message"])
 
+    def test_restore_calls_transactional_restore(self):
+        with mock.patch.object(self.module.config, "restore_last_change",
+                               return_value=(True, "restored")) as restore:
+            request = urllib.request.Request(
+                self.base + "/api/restore", data=b"{}", method="POST",
+                headers={"Content-Type": "application/json",
+                         "Origin": self.base,
+                         "Cookie": "mcp_dashboard_test=" + self.token})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                body = json.loads(response.read())
+        self.assertTrue(body["ok"])
+        restore.assert_called_once_with()
+
 
 class TestAtomicWrite(unittest.TestCase):
     def test_write_replaces_without_leaving_temp_files(self):
@@ -1009,6 +1052,111 @@ class TestAtomicWrite(unittest.TestCase):
             atomic_write(target, '{"a": 2}')
             self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"a": 2})
             self.assertEqual([p.name for p in target.parent.iterdir()], ["f.json"])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX permission semantics")
+    def test_preserves_existing_mode_and_secures_new_files(self):
+        import stat
+        from mcpdash.common import atomic_write
+        with tempfile.TemporaryDirectory() as td:
+            existing = Path(td) / "existing.json"
+            existing.write_text("old", encoding="utf-8")
+            existing.chmod(0o640)
+            atomic_write(existing, "new")
+            self.assertEqual(stat.S_IMODE(existing.stat().st_mode), 0o640)
+            created = Path(td) / "created.json"
+            atomic_write(created, "new")
+            self.assertEqual(stat.S_IMODE(created.stat().st_mode), 0o600)
+
+
+class TestV1Runtime(unittest.TestCase):
+    def test_open_alias_starts_live_server_and_browser(self):
+        import mcp_dashboard
+        with mock.patch.object(sys, "argv", ["mcp-dashboard", "open"]), \
+                mock.patch.object(mcp_dashboard, "ensure_side_files"), \
+                mock.patch.object(mcp_dashboard, "serve") as serve:
+            mcp_dashboard.main()
+        args = serve.call_args.args[0]
+        self.assertTrue(args.serve)
+        self.assertTrue(args.open)
+
+    def test_package_and_runtime_versions_match(self):
+        import mcpdash
+        metadata = load_toml(Path(__file__).resolve().parents[1] / "pyproject.toml")
+        self.assertEqual(metadata["project"]["version"], mcpdash.__version__)
+
+    def test_no_usage_scan_never_reads_transcripts(self):
+        import mcp_dashboard
+        with mock.patch.object(mcp_dashboard.config, "discover_servers",
+                               return_value=[]), \
+                mock.patch.object(mcp_dashboard.probe, "list_processes",
+                                  return_value=[]), \
+                mock.patch.object(mcp_dashboard.usage, "collect_usage",
+                                  side_effect=AssertionError("transcripts read")):
+            servers, skill_usage = mcp_dashboard.scan(
+                use_cli=False, include_usage=False)
+        self.assertEqual(servers, [])
+        self.assertEqual(skill_usage, {})
+
+    def test_portable_home_uses_separate_directories(self):
+        from mcpdash import common
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.dict(os.environ, {"MCP_DASHBOARD_HOME": td}):
+            config_dir, state_dir, cache_dir = common._app_dirs()
+        self.assertEqual(config_dir, Path(td) / "config")
+        self.assertEqual(state_dir, Path(td) / "state")
+        self.assertEqual(cache_dir, Path(td) / "cache")
+
+    def test_native_directory_conventions(self):
+        from mcpdash import common
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            base_env = {"MCP_DASHBOARD_HOME": "",
+                        "APPDATA": str(root / "roaming"),
+                        "LOCALAPPDATA": str(root / "local"),
+                        "XDG_CONFIG_HOME": str(root / "xdg-config"),
+                        "XDG_STATE_HOME": str(root / "xdg-state"),
+                        "XDG_CACHE_HOME": str(root / "xdg-cache")}
+            with mock.patch.object(Path, "home",
+                                   classmethod(lambda cls: root / "home")), \
+                    mock.patch.dict(os.environ, base_env), \
+                    mock.patch.object(common.platform, "system",
+                                      return_value="Windows"):
+                windows = common._app_dirs()
+            self.assertEqual(windows[0], root / "roaming" / "mcp-dashboard")
+            self.assertEqual(windows[1], root / "local" / "mcp-dashboard" / "state")
+            with mock.patch.object(Path, "home",
+                                   classmethod(lambda cls: root / "home")), \
+                    mock.patch.dict(os.environ, base_env), \
+                    mock.patch.object(common.platform, "system",
+                                      return_value="Linux"):
+                linux = common._app_dirs()
+            self.assertEqual(linux, (root / "xdg-config" / "mcp-dashboard",
+                                     root / "xdg-state" / "mcp-dashboard",
+                                     root / "xdg-cache" / "mcp-dashboard"))
+
+    def test_legacy_migration_never_overwrites_destination(self):
+        from mcpdash import common
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            legacy = root / "legacy.json"
+            destination = root / "state" / "new.json"
+            legacy.write_text('{"legacy": true}', encoding="utf-8")
+            with mock.patch.object(common, "LEGACY_PATHS",
+                                   {destination: legacy}):
+                copied = common.migrate_legacy_state()
+                self.assertEqual(copied, [destination])
+                destination.write_text('{"mine": true}', encoding="utf-8")
+                self.assertEqual(common.migrate_legacy_state(), [])
+            self.assertEqual(json.loads(destination.read_text(encoding="utf-8")),
+                             {"mine": True})
+
+    def test_doctor_writable_check_is_reversible(self):
+        from mcpdash import doctor
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "state"
+            ok, _ = doctor._writable_directory(target)
+            self.assertTrue(ok)
+            self.assertEqual(list(target.iterdir()), [])
 
 
 if __name__ == "__main__":
