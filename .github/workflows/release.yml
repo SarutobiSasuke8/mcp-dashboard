@@ -41,6 +41,9 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job downloads artefacts but never checks out the repository,
+          # so gh has no git context to infer the repo from. Name it directly.
+          GH_REPO: ${{ github.repository }}
         run: gh release create "${GITHUB_REF_NAME}" dist/* --verify-tag --generate-notes
 
   pypi-publish:
