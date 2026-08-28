@@ -4,8 +4,6 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/LICENSE)
 [![status: v1 release candidate](https://img.shields.io/badge/status-v1_release_candidate-7c3aed.svg)](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/ROADMAP.md)
 
-![MCP Dashboard — local AI tool cost and usage control](https://raw.githubusercontent.com/SarutobiSasuke8/mcp-dashboard/main/docs/mcp-dashboard-hero.png)
-
 Cost and benefit of your MCP toolbox, across **Claude Code, OpenAI Codex,
 Gemini CLI, and Cursor** — what each server costs in RAM, CPU, context
 tokens, and startup time, weighed against how often you actually call it,
@@ -18,12 +16,7 @@ release automation are implemented. The repository remains a **v1 release
 candidate** until the cross-platform release checklist and first tagged
 publication are completed.
 
-<details>
-<summary><strong>See the dashboard</strong></summary>
-
 ![MCP Server Dashboard](https://raw.githubusercontent.com/SarutobiSasuke8/mcp-dashboard/main/docs/screenshot.png)
-
-</details>
 
 Design record: [DESIGN.md](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/DESIGN.md) — why, how it measures cost, the
 provenance and verdict rules, and how the control endpoint is secured.
