@@ -2,7 +2,8 @@
 
 [![tests](https://github.com/SarutobiSasuke8/mcp-dashboard/actions/workflows/tests.yml/badge.svg)](https://github.com/SarutobiSasuke8/mcp-dashboard/actions/workflows/tests.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/LICENSE)
-[![status: v1 release candidate](https://img.shields.io/badge/status-v1_release_candidate-7c3aed.svg)](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/ROADMAP.md)
+[![PyPI](https://img.shields.io/pypi/v/mcp-dashboard.svg)](https://pypi.org/project/mcp-dashboard/)
+[![Python](https://img.shields.io/pypi/pyversions/mcp-dashboard.svg)](https://pypi.org/project/mcp-dashboard/)
 
 Cost and benefit of your MCP toolbox, across **Claude Code, OpenAI Codex,
 Gemini CLI, and Cursor** — what each server costs in RAM, CPU, context
@@ -11,10 +12,6 @@ with working on/off switches and a skills directory.
 
 **Zero required runtime dependencies and no remote UI assets.** Python 3.10+
 standard library only; `psutil` is an optional extra for live CPU sampling.
-The installable v1 package, isolated state, diagnostics, recovery controls, and
-release automation are implemented. The repository remains a **v1 release
-candidate** until the cross-platform release checklist and first tagged
-publication are completed.
 
 ![MCP Server Dashboard](https://raw.githubusercontent.com/SarutobiSasuke8/mcp-dashboard/main/docs/screenshot.png)
 
@@ -38,7 +35,7 @@ question is never RAM alone: it is cost versus use.
 
 ## Install and start in 60 seconds
 
-Prerequisite: Python 3.10+. No API key is needed. After v1 is published:
+Prerequisite: Python 3.10+. No API key is needed.
 
 ```bash
 pipx install mcp-dashboard
@@ -46,9 +43,8 @@ mcp-dashboard --doctor
 mcp-dashboard open --probe
 ```
 
-Until the first PyPI publication, install the release candidate directly from
-GitHub with `pipx install git+https://github.com/SarutobiSasuke8/mcp-dashboard.git`,
-or use the source workflow in the [onboarding guide](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/docs/GETTING_STARTED.md).
+Prefer the latest commit? `pipx install git+https://github.com/SarutobiSasuke8/mcp-dashboard.git`.
+Running from a source checkout is covered in the [onboarding guide](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/docs/GETTING_STARTED.md).
 
 That command discovers local MCP configuration, briefly probes enabled stdio
 servers, starts the authenticated dashboard at `127.0.0.1:7817`, and opens the
