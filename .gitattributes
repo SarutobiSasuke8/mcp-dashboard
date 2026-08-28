@@ -1,0 +1,13 @@
+# Normalise to LF in the repository so contributors on Windows, macOS, and
+# Linux never trade CRLF churn in diffs. Working copies still get native
+# endings on checkout.
+* text=auto eol=lf
+
+# Windows-only script: keep CRLF so it runs from Explorer and older shells.
+*.ps1 text eol=crlf
+
+# Never touch binaries.
+*.png binary
+*.ico binary
+*.gz binary
+*.whl binary
