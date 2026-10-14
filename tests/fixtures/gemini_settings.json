@@ -1,0 +1,10 @@
+{
+  "theme": "dark",
+  "mcpServers": {
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "env": {"FETCH_API_KEY": "$env:FETCH_API_KEY"}
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{"ts": "2026-10-01T09:00:00", "total_mb": 120.0, "total_tokens": 4000, "servers": {"claude::user::filesystem": 80.0, "claude::user::my-tools": 40.0}}
+this line is not json
+{"ts": "2026-10-02T09:00:00", "total_mb": 150.5, "total_tokens": 4200, "servers": {"claude::user::filesystem": 90.5, "claude::user::my-tools": 60.0}}
+
+{"ts": "2026-10-03T09:00:00", "total_mb": 140.0, "total_tokens": 4100, "servers": {"claude::user::filesystem": 85.0, "claude::user::my-tools": 55.0}}

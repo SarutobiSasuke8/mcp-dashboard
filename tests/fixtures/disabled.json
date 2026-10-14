@@ -1,0 +1,16 @@
+{
+  "claude::user::old-search": {
+    "agent": "claude",
+    "name": "old-search",
+    "scope": "user",
+    "origin": "~/.claude.json",
+    "raw": {"command": "npx", "args": ["-y", "@vendorless/search-mcp"]}
+  },
+  "cursor::user::playwright": {
+    "agent": "cursor",
+    "name": "playwright",
+    "scope": "user",
+    "origin": "FIXTURE_CURSOR_PATH",
+    "raw": {"command": "npx", "args": ["@playwright/mcp@latest"]}
+  }
+}
