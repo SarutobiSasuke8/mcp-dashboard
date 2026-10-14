@@ -1,237 +1,301 @@
 # MCP Dashboard
 
+[![ci](https://github.com/SarutobiSasuke8/mcp-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/SarutobiSasuke8/mcp-dashboard/actions/workflows/ci.yml)
 [![tests](https://github.com/SarutobiSasuke8/mcp-dashboard/actions/workflows/tests.yml/badge.svg)](https://github.com/SarutobiSasuke8/mcp-dashboard/actions/workflows/tests.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/mcp-dashboard.svg)](https://pypi.org/project/mcp-dashboard/)
 [![Python](https://img.shields.io/pypi/pyversions/mcp-dashboard.svg)](https://pypi.org/project/mcp-dashboard/)
 
-Cost and benefit of your MCP toolbox, across **Claude Code, OpenAI Codex,
-Gemini CLI, and Cursor** — what each server costs in RAM, CPU, context
-tokens, and startup time, weighed against how often you actually call it,
-with working on/off switches and a skills directory.
+A local dashboard for the cost and benefit of your MCP toolbox across
+**Claude Code, OpenAI Codex, Gemini CLI, and Cursor**. It shows what each
+server costs in RAM, CPU, context tokens, and startup time, set against how
+often you actually call it, with working on/off switches and a skills
+directory.
 
-**Zero required runtime dependencies and no remote UI assets.** Python 3.10+
-standard library only; `psutil` is an optional extra for live CPU sampling.
+**Zero required runtime dependencies and no remote UI assets.** Python 3.10
+or newer and the standard library are enough. `psutil` is an optional extra
+for live CPU sampling. No API key is required. Version 1.0.0 is published on
+PyPI.
 
 ![MCP Server Dashboard](https://raw.githubusercontent.com/SarutobiSasuke8/mcp-dashboard/main/docs/screenshot.png)
 
-Design record: [DESIGN.md](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/DESIGN.md) — why, how it measures cost, the
-provenance and verdict rules, and how the control endpoint is secured.
-What's next: [ROADMAP.md](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/ROADMAP.md).
+Design record: [DESIGN.md](DESIGN.md). What is next: [ROADMAP.md](ROADMAP.md).
+Install detail, privacy choices, and troubleshooting:
+[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
 
-**Where outputs go:** inside an Obsidian vault, Markdown outputs go to its
-`Obsidian Vault Management/Systems/` folder. Otherwise reports, state, cache,
-profiles, and recovery points use platform-native user directories—never
-site-packages. Override the application home with `MCP_DASHBOARD_HOME`, the
-vault with `MCP_DASHBOARD_VAULT`, or individual outputs with `--html`/`--note`.
+## What it shows
 
-## Why
+The generated page has three views. The header theme control cycles
+automatic, light, and dark. The theme is stored in the browser, and the open
+view is kept in the URL hash, so both survive a live-control reload. On
+narrow screens, tables collapse into labelled cards.
 
-Local **stdio** MCP servers (launched via `npx`, `node`, `uvx`, `python`,
-`docker`) are real OS processes, spawned **once per open agent session** —
-three open sessions run every stdio server three times. Remote connectors
-cost no local RAM but still inject tool schemas into every request. So the
-question is never RAM alone: it is cost versus use.
+### Servers
 
-## Install and start in 60 seconds
+Summary tiles: configured servers (and how many are off), processes running
+locally, local RAM, context cost, calls in 30 days, and how many servers
+were built by you.
 
-Prerequisite: Python 3.10+. No API key is needed.
+Under the tiles:
+
+- a filter for name, agent, scope, or verdict
+- a chart of local MCP RAM over time
+- a **local stdio** table: server, status and verdict, calls in 30 days,
+  context cost, process count, CPU, RAM with a sparkline, and an on/off
+  switch
+- a **remote** table: server, status, calls in 30 days, context cost, and an
+  on/off switch
+
+Only stdio servers cost local RAM. Remote HTTP and SSE servers still add
+tool schemas to context. Connectors that exist only on claude.ai are not
+listed here.
+
+Each server row shows its agent, scope, transport, and command, plus a
+provenance badge: `yours`, `official`, `vendor`, `community`, `remote`, or
+`unlabeled`.
+
+### Advisor
+
+Summary tiles: items that need attention, reclaimable RAM, context tokens,
+and how many plaintext credentials were found in config.
+
+Under the tiles:
+
+- ranked recommendations, with estimated RAM savings and, in live mode, a
+  switch-off button
+- profile buttons that enable a named set and disable every other togglable
+  server
+- in live mode, a recovery button that restores the files from the most
+  recent successful dashboard config change
+- a bar chart of the most-used servers over 30 days
+- a bar chart of the heaviest servers by RAM
+- a credentials section when plaintext secrets are present in config
+
+A static report shows the same layout, but the switches and profile buttons
+do nothing. Use `mcp-dashboard open` when you want working controls.
+
+### Skills
+
+Summary tiles: skills installed, skills used in 30 days, how many sources
+were found, and name collisions.
+
+The directory is built from vault and project `.agents/skills`,
+`.codex/skills`, and `.claude/skills`, then synced skills, user skills,
+`CODEX_HOME`, and plugin copies. Each row shows the source, calls in 30
+days, last use, and description. A `locked` chip comes from
+`skills-lock.json`. When the same name is defined more than once, a
+collision note names the copy that wins.
+
+## Setup
+
+Prerequisite: Python 3.10 or newer. No API key.
 
 ```bash
 pipx install mcp-dashboard
 mcp-dashboard --doctor
+```
+
+`pipx` keeps the application isolated and puts `mcp-dashboard` on your
+`PATH`. Diagnostics check Python, writable config, state, and cache
+directories, whether port 7817 is free, optional CPU sampling, and whether
+the Claude, Codex, Gemini, and Cursor CLIs are on `PATH`. A missing CLI is
+informational: config files can still be read directly.
+
+Optional live CPU sampling, which is also the only way to get a CPU figure
+on Windows:
+
+```bash
+pipx inject mcp-dashboard psutil
+```
+
+The same extra is declared as `mcp-dashboard[cpu]` if you install with pip.
+
+From a source checkout, without installing the package:
+
+```bash
+git clone https://github.com/SarutobiSasuke8/mcp-dashboard.git
+cd mcp-dashboard
+python mcp_dashboard.py --doctor
+```
+
+On Windows, use `py` instead of `python` when that is how Python is
+installed. `python -m mcpdash` is the packaging-independent fallback and
+accepts the same arguments.
+
+To install the current default branch rather than the PyPI release:
+
+```bash
+pipx install git+https://github.com/SarutobiSasuke8/mcp-dashboard.git
+```
+
+## Run
+
+The usual first look, including a one-off probe of enabled stdio servers:
+
+```bash
 mcp-dashboard open --probe
 ```
 
-Prefer the latest commit? `pipx install git+https://github.com/SarutobiSasuke8/mcp-dashboard.git`.
-Running from a source checkout is covered in the [onboarding guide](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/docs/GETTING_STARTED.md).
+That discovers local MCP configuration, reads transcript metadata for 30-day
+usage, starts each enabled stdio server once to measure tools and startup,
+writes the dashboard, and opens `http://127.0.0.1:7817/` with a one-time
+token. Keep the terminal open while you use the switches. Stop the server
+with `Ctrl+C`. Do not bookmark the tokenised URL: the token is new on every
+run. If the browser does not open, copy the URL the command prints. If port
+7817 is busy, pass `--port` with another free local port.
 
-That command discovers local MCP configuration, briefly probes enabled stdio
-servers, starts the authenticated dashboard at `127.0.0.1:7817`, and opens the
-correct one-time URL in your browser. Keep the terminal open while using live
-switches; press `Ctrl+C` to stop it. The first probe can take a little longer
-because each server is started once.
-
-For a faster read-only first look, run `mcp-dashboard --open`. See the complete
-[installation and onboarding guide](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/docs/GETTING_STARTED.md), including source
-installation, privacy choices, migration, troubleshooting, and scheduled scans.
-
-> Do not bookmark the tokenized live URL: a fresh local security token is
-> generated on every run. Reopen the dashboard with the command above.
-
-## Usage
-
-```bash
-mcp-dashboard open                  # live dashboard + browser (recommended)
-mcp-dashboard open --probe          # also refresh context/startup measurements
-mcp-dashboard scan                  # write a static dashboard + directory note
-mcp-dashboard --open                # static report and open it
-mcp-dashboard --report              # append a usage snapshot
-mcp-dashboard --tasks               # file high-severity findings as tasks
-mcp-dashboard --profile coding      # apply a named server set
-mcp-dashboard --list-profiles
-mcp-dashboard --restore-last        # undo the most recent dashboard config change
-mcp-dashboard --no-usage            # do not read agent transcripts
-mcp-dashboard --json out.json       # recursively redacted machine-readable snapshot
-mcp-dashboard --demo --open         # preview safe sample data
-```
-
-### Everyday opening flow
-
-The memorable command is:
+For a faster read-only first look, omit `--probe`:
 
 ```bash
 mcp-dashboard open
 ```
 
-Use `--probe` when server definitions change or you want fresh startup/context
-measurements; ordinary live opens can omit it. Use `--open` without `--serve`
-for a static report whose controls are intentionally disabled.
+Other commands that exist today:
 
-Tests: `python -m unittest discover -s tests` (standard library only; 73 tests).
-
-Optional: `pipx inject mcp-dashboard psutil` for live CPU sampling (and any CPU
-reading at all on Windows).
-
-**Platforms:** built and battle-tested on Windows; the macOS/Linux paths
-(`ps`-based process matching, POSIX config locations) are implemented and
-unit-tested in CI but have had less real-machine mileage — issues welcome.
-
-## Views
-
-- **Servers** — filterable tiles, RAM-over-time chart, and a table per server: status,
-  verdict, calls in 30 days, context cost, process count, CPU, RAM with
-  sparkline, and an on/off switch. Tables collapse into labelled cards on
-  smaller screens. Local stdio and remote servers are listed separately
-  because only the former cost RAM.
-- **Advisor** — ranked recommendations with estimated savings and one-click
-  switch-off, profile buttons, most-used and heaviest bar charts, and any
-  plaintext credentials found in config.
-- **Skills** — every skill from Claude, `.agents`, `.codex`, vault, project,
-  user, synced, and plugin paths, with filtering, 30-day usage, `locked`
-  markers from `skills-lock.json`, and name-collision warnings showing which
-  copy wins.
-
-The header theme control cycles automatic, light, and dark modes. The chosen
-view and theme survive live-control reloads.
-
-## How it measures
-
-- **Config**: `~/.claude.json` (user + per-project), each project's
-  `.mcp.json`, `~/.codex/config.toml` (`CODEX_HOME` respected),
-  `~/.gemini/settings.json`, `~/.cursor/mcp.json`.
-- **RAM/CPU**: process table via psutil, else `ps` / PowerShell
-  `Get-CimInstance`; matches each server's most distinctive command token and
-  sums the process tree. Shells, editors, and search tools are never counted,
-  and neither are this script's own ancestors. A process tree matching more
-  than one configured definition is counted once and marked as estimated.
-- **Context cost** (`--probe`): starts each stdio server, completes the MCP
-  `initialize` handshake, calls `tools/list`, and records tool count,
-  estimated schema tokens, startup latency, and real stderr on failure.
-  Cached in `mcp-probe-cache.json`; a configuration fingerprint invalidates
-  stale results automatically.
-- **Usage**: `tool_use` blocks named `mcp__<server>__<tool>` in Claude Code
-  transcripts (`~/.claude/projects/**/*.jsonl`), plus best-effort parsing of
-  Codex rollout logs. Counts are separated by agent and attributed to a
-  matching project definition where the transcript identifies one, so
-  duplicate configurations do not multiply totals. Skill invocations are
-  counted the same way.
-
-## Verdicts
-
-`earning` (used in 30d) · `quiet` (cheap and idle) · `dormant` (used before,
-not lately) · `unused` (never called, still costing) · `expensive` (high cost,
-≤2 calls) · `broken` (failing) · `disabled`. Servers installed less than 7
-days ago are not judged as unused.
-
-## Provenance
-
-Badges: `yours` (self-built), `official`, `vendor`, `community`, `remote`,
-`unlabeled`. Auto-detected, overridden by `mcp-provenance.json`:
-
-```json
-{ "vault-bridge": "self-built",
-  "some-server": { "provenance": "community", "note": "forked for X" } }
+```bash
+mcp-dashboard scan                  # write a static dashboard and directory note
+mcp-dashboard --open                # static report, then open it in a browser
+mcp-dashboard --doctor              # check Python, storage, port, and CLIs
+mcp-dashboard --report              # append a usage snapshot
+mcp-dashboard --tasks               # file high-severity findings as tasks
+mcp-dashboard --profile coding      # apply a named server set, then exit
+mcp-dashboard --list-profiles
+mcp-dashboard --restore-last        # undo the most recent dashboard config change
+mcp-dashboard --no-usage            # do not read agent transcripts
+mcp-dashboard --json out.json       # machine-readable snapshot, secrets redacted
+mcp-dashboard --demo --open         # preview the page with sample data
+mcp-dashboard --version
 ```
 
-## Toggles and profiles (`--serve`)
+`open` is shorthand for `--serve --open`. `scan` is the default write-only
+run. `--probe` can be slow because each enabled stdio server is started
+once; `--probe-timeout` defaults to 25 seconds. `--no-usage`, or
+`MCP_DASHBOARD_NO_USAGE=1`, skips transcript reading. Discovery, process
+measurement, probing, controls, skills, and reports still run.
 
-The static HTML cannot change config — control lives in the local server.
-Off removes the server from that agent's config (CLI first, direct file edit
-with a timestamped backup as fallback) and stashes it in
-`mcp-disabled.json`; on restores it. Profiles in `mcp-profiles.json` enable
-a named set and disable everything else, across all agents at once. Changes
-apply to **new** sessions. Profile changes are transactional: if any mutation
-fails, the affected config and stash files are restored to their pre-profile
-state. Live changes require confirmation and create a local single-use recovery
-point; use the Advisor's recovery button or `mcp-dashboard --restore-last`.
+The seed profiles in the source checkout are `minimal`, `coding`, and
+`research`. Applying a profile changes configuration for **new** agent
+sessions. Processes that are already running keep going until that session
+restarts. Live changes ask for confirmation in the browser, write a
+timestamped backup, and record one local recovery point. Restore it from
+the Advisor view or with `mcp-dashboard --restore-last`.
 
-Because this endpoint edits real config, it binds to loopback only, rejects a
-non-loopback `Host` (blocking DNS rebinding), and requires a per-run token —
-the initial query token establishes a short-lived `HttpOnly`,
-`SameSite=Strict` loopback session cookie, and mutations require an exact
-same-origin request. The live response also sends a separate nonce-based
-Content Security Policy, disables framing and caching, and suppresses
-referrers. Open the URL the command prints; the token is removed from the
-visible URL once the page initializes.
+### Scheduled scans on Windows
 
-## Scheduling
+From a source checkout:
 
 ```powershell
-.\Register-MCPDashboardScan.ps1                              # every 4h, quiet scan
+.\Register-MCPDashboardScan.ps1
 .\Register-MCPDashboardScan.ps1 -IntervalHours 12 -Report -Probe
 .\Register-MCPDashboardScan.ps1 -Unregister
 ```
 
-## Files
+The task refreshes outputs. It is not a permanently running web service.
+Open the live dashboard with `mcp-dashboard open`.
+
+## Where outputs go
+
+If the working directory or the checkout sits inside an Obsidian vault (a
+directory that contains `Obsidian Vault Management/`), the HTML dashboard,
+directory note, and usage report are written to
+`Obsidian Vault Management/Systems/`. Otherwise those three files go to
+`<state>/reports/`.
+
+Config, state, and cache never go into site-packages:
+
+| Platform | Config | State | Cache |
+| --- | --- | --- | --- |
+| Windows | `%APPDATA%\mcp-dashboard` | `%LOCALAPPDATA%\mcp-dashboard\state` | `%LOCALAPPDATA%\mcp-dashboard\cache` |
+| macOS | `~/Library/Application Support/mcp-dashboard` | the same tree, under `state/` | `~/Library/Caches/mcp-dashboard` |
+| Linux | `$XDG_CONFIG_HOME/mcp-dashboard` or `~/.config/mcp-dashboard` | `$XDG_STATE_HOME/mcp-dashboard` or `~/.local/state/mcp-dashboard` | `$XDG_CACHE_HOME/mcp-dashboard` or `~/.cache/mcp-dashboard` |
+
+`MCP_DASHBOARD_HOME` places config, state, and cache under one portable
+root. `MCP_DASHBOARD_VAULT` selects the vault. `--html` and `--note` override
+those two output paths.
+
+Generated names, when you do not override them:
 
 | File | What |
 | --- | --- |
-| `mcp_dashboard.py`, `mcpdash/` | The tool |
-| `pyproject.toml` | Package metadata and `mcp-dashboard` console entry point |
-| `mcp-provenance.json` | Source-checkout seed for user provenance labels |
-| `mcp-profiles.json` | Source-checkout seed for named server sets |
-| `Register-MCPDashboardScan.ps1` | Scheduled-task registration |
-| `tests/`, `scripts/` | Tests and installed-wheel/release verification |
-| `<outputs>/MCP Server Dashboard.html` | Generated dashboard |
-| `<outputs>/MCP Directory.md` | Living registry note |
-| `<outputs>/MCP Usage Report.md` | Rolling snapshots (`--report`) |
-| Platform config/state/cache directories | Profiles, provenance, registry, history, caches, disabled stash, and recovery points |
+| `MCP Server Dashboard.html` | The dashboard page |
+| `MCP Directory.md` | Living registry note |
+| `MCP Usage Report.md` | Rolling snapshots from `--report` |
 
-## Trimming RAM
+Profiles, provenance labels, the disabled-server stash, probe cache, usage
+cache, history, and recovery points live in the platform directories above.
 
-1. Act on the Advisor tab — it ranks by what you actually use.
-2. Move single-project servers to that project's `.mcp.json`.
-3. Prefer remote (HTTP) variants where they exist — zero local RAM.
-4. Close idle sessions; each holds its own copy of every stdio server.
+## How it measures
+
+- **Config:** `~/.claude.json` (user and per-project entries), each project's
+  `.mcp.json`, `~/.codex/config.toml` (`CODEX_HOME` is respected),
+  `~/.gemini/settings.json`, and `~/.cursor/mcp.json`.
+- **RAM and CPU:** the process table via psutil, otherwise `ps` or PowerShell
+  `Get-CimInstance`. Each server is matched on its most distinctive command
+  token, and the process tree is summed. Shells, editors, search tools, and
+  this program's own ancestors are never counted. A tree that matches more
+  than one configured definition is counted once and marked as estimated.
+  Without psutil, Windows reports RAM but not CPU.
+- **Context cost (`--probe`):** starts each enabled stdio server, completes
+  the MCP `initialize` handshake, calls `tools/list`, and records tool count,
+  estimated schema tokens, startup latency, and stderr on failure. Results
+  are cached. A configuration fingerprint marks a cached probe as stale.
+- **Usage:** `tool_use` blocks named `mcp__<server>__<tool>` in Claude Code
+  transcripts (`~/.claude/projects/**/*.jsonl`), plus a best-effort reading
+  of Codex rollout logs. Counts stay separated by agent. Skill invocations
+  are counted the same way.
+
+## Verdicts
+
+`earning` (used in the last 30 days), `quiet` (cheap and idle), `dormant`
+(used before, not lately), `unused` (never called, still costing),
+`expensive` (high cost and two calls or fewer), `broken` (failing),
+`disabled`. A server installed fewer than seven days ago is not judged
+unused.
+
+Provenance is detected automatically. Override it in the user-config copy of
+`mcp-provenance.json`. Values are `self-built`, `official`, `vendor`, or
+`community`, or an object with `provenance` and `note`. The badge `yours`
+is the self-built label. Manual labels beat auto-detection. The source
+checkout ships a seed file; the running tool reads the copy under the
+platform config directory.
+
+## Development
+
+This repository has no `package.json` and no npm scripts. The checks below
+are the ones the project actually runs:
+
+```bash
+python -m pip install -e .
+python -m pip install "ruff==0.15.10" "build==1.6.0"
+ruff check mcp_dashboard.py mcpdash tests scripts
+python -m build
+python -m unittest discover -s tests -v
+```
+
+The suite is 73 tests and uses only the standard library. It patches
+`Path.home` and stubs agent CLIs, so it does not edit your real config.
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs that install,
+lint, build, and test sequence on Ubuntu with Python 3.13.
+[`.github/workflows/tests.yml`](.github/workflows/tests.yml) keeps the wider
+matrix: Ubuntu, Windows, and macOS, on Python 3.10 and 3.13, plus Ruff and
+an installed-wheel smoke test.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and
+[CHANGELOG.md](CHANGELOG.md) for versioned changes.
 
 ## Safety
 
-Every config edit — including ones routed through the `claude`/`codex`
-CLIs — takes a timestamped backup of the file first, and disabled servers
-are stashed in full so switching them back on is lossless. Machine-readable
-exports recursively redact credential-like values in environment, header,
-command arguments, authenticated URLs, query parameters, and vendor-specific
-config blocks. The test suite runs inside a hard sandbox
-(`Path.home` patched, agent CLIs stubbed) and can never touch your real config.
+Every config edit, including edits routed through the `claude` or `codex`
+CLIs, takes a timestamped backup first. Disabled servers are stashed in full,
+so switching them back on is lossless. Because the live endpoint edits real
+config, it binds to loopback only, rejects a non-loopback `Host`, and
+requires the per-run token printed by the command. Machine-readable exports
+redact credential-like values. The tool reads local configuration and
+transcript metadata on this machine and does not send that data anywhere.
+Generated reports can contain server names, project names, and local paths,
+so review them before sharing. See [SECURITY.md](SECURITY.md).
 
-The tool reads local agent configuration and transcript metadata to calculate
-usage. It does not send that data anywhere. Generated reports can contain
-server names, project names, and local paths, so review them before sharing.
-Disable transcript reading with `--no-usage` or
-`MCP_DASHBOARD_NO_USAGE=1`.
-See [SECURITY.md](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/SECURITY.md) for the security model and private reporting
-instructions.
+## Licence
 
-## Contributing and release status
-
-Bug reports and focused pull requests are welcome; start with
-[CONTRIBUTING.md](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/CONTRIBUTING.md). The codebase is a packaged v1 release
-candidate; publication still depends on the maintainer-owned administration,
-cross-platform evidence, and tag gates in [ROADMAP.md](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/ROADMAP.md) and the
-[release checklist](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/docs/RELEASE_CHECKLIST.md). See [CHANGELOG.md](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/CHANGELOG.md)
-for versioned changes.
-
-## License
-
-[MIT](https://github.com/SarutobiSasuke8/mcp-dashboard/blob/main/LICENSE). Free to use, fork, and build on.
+[MIT](LICENSE). Free to use, fork, and build on.

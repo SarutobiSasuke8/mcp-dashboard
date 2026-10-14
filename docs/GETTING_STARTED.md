@@ -6,13 +6,13 @@ the application isolated while exposing the `mcp-dashboard` command globally.
 
 ## 1. Install
 
-After the first PyPI release:
+Version 1.0.0 is published on PyPI. `pipx` is the recommended installer:
 
 ```bash
 pipx install mcp-dashboard
 ```
 
-Before PyPI publication, install the release candidate from GitHub:
+To install the current default branch instead of the PyPI release:
 
 ```bash
 pipx install git+https://github.com/SarutobiSasuke8/mcp-dashboard.git
