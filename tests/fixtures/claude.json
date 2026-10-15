@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/srv/data"]
+    },
+    "my-tools": {
+      "command": "node",
+      "args": ["/work/my-tools/server.js"],
+      "env": {"MY_TOOLS_TOKEN": "fixture-plaintext-value-0001", "LOG_LEVEL": "debug"}
+    },
+    "docs-remote": {
+      "type": "http",
+      "url": "https://user:pass@mcp.example.test:8443/mcp?api_key=fixture-query-value&region=eu",
+      "headers": {"Authorization": "Bearer fixture-header-value-0002"}
+    }
+  },
+  "projects": {
+    "/work/alpha": {
+      "mcpServers": {
+        "filesystem": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/work/alpha"]}
+      }
+    }
+  }
+}

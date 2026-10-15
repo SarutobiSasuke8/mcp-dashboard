@@ -1,0 +1,8 @@
+model = "fixture-model"
+
+[mcp_servers.memory]
+command = "npx"
+args = ["-y", "@community/memory-server", "--token", "fixture-arg-value-0003"]
+
+[mcp_servers.memory.env]
+MEMORY_PATH = "${HOME}/memory.db"

@@ -1,0 +1,5 @@
+{
+  "_help": "Fixture overrides. Keys starting with an underscore are ignored.",
+  "filesystem": {"provenance": "vendor", "note": "pinned by fixture"},
+  "fetch": "self-built"
+}

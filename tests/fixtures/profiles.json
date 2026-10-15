@@ -1,0 +1,6 @@
+{
+  "_help": "Fixture profiles.",
+  "writing": ["filesystem", "fetch"],
+  "empty": [],
+  "broken": "not-a-list"
+}
