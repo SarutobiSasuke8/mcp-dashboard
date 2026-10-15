@@ -1,6 +1,7 @@
 """Shared paths and helpers for the MCP Dashboard."""
 
 import datetime
+import glob
 import json
 import os
 import platform
@@ -258,7 +259,14 @@ def run_cli(cmd, cwd=None, timeout=60):
 
 
 BACKUP_KEEP = 10
-_BACKUP_STAMP_RE = re.compile(r"\.bak-\d{8}-\d{6}(?:-\d{6})?$")
+# Optional trailing "-N" is a collision counter, added only when the clock
+# has not moved on since the previous backup (Windows ticks at ~15 ms).
+_BACKUP_STAMP_RE = re.compile(r"\.bak-(\d{8}-\d{6}(?:-\d{6})?)(?:-(\d+))?$")
+
+
+def _backup_sort_key(p):
+    m = _BACKUP_STAMP_RE.search(p.name)
+    return (m.group(1), int(m.group(2) or 0))
 
 
 def backup_file(path, keep=BACKUP_KEEP):
@@ -271,10 +279,28 @@ def backup_file(path, keep=BACKUP_KEEP):
     # Microseconds prevent two rapid mutations (or a CLI fallback in the
     # same second) from overwriting the only pristine recovery point.
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    destination = path.with_name(path.name + f".bak-{stamp}")
+    # The clock can repeat a stamp, so reserve the name with an exclusive
+    # create and fall back to a counter suffix rather than overwrite. The
+    # counter continues past any existing one for this stamp, so a name
+    # freed by pruning is never reused (it would sort as the oldest).
+    base = path.name + f".bak-{stamp}"
+    same_tick = [_backup_sort_key(p)[1]
+                 for p in path.parent.glob(glob.escape(base) + "*")
+                 if _BACKUP_STAMP_RE.search(p.name)
+                 and _BACKUP_STAMP_RE.search(p.name).group(1) == stamp]
+    counter = max(same_tick) + 1 if same_tick else 0
+    while True:
+        destination = path.with_name(
+            base if counter == 0 else f"{base}-{counter}")
+        try:
+            with open(destination, "xb"):
+                pass
+            break
+        except FileExistsError:
+            counter += 1
     shutil.copy2(path, destination)
-    ours = sorted(p for p in path.parent.glob(path.name + ".bak-*")
-                  if _BACKUP_STAMP_RE.search(p.name))
+    ours = sorted((p for p in path.parent.glob(path.name + ".bak-*")
+                   if _BACKUP_STAMP_RE.search(p.name)), key=_backup_sort_key)
     for old in ours[:-keep]:
         try:
             old.unlink()

@@ -945,6 +945,40 @@ class TestBackupPruning(unittest.TestCase):
             self.assertEqual({p.read_text(encoding="utf-8") for p in backups},
                              {'{"version": 1}', '{"version": 2}'})
 
+    def test_same_tick_backups_do_not_overwrite(self):
+        import datetime
+        from unittest import mock
+        from mcpdash import common
+
+        frozen = datetime.datetime(2026, 10, 15, 12, 0, 0, 123456)
+
+        class FrozenDateTime(datetime.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return frozen
+
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.object(common.datetime, "datetime", FrozenDateTime):
+            target = Path(td) / "config.json"
+            made = []
+            for version in range(1, 13):
+                target.write_text(f'{{"version": {version}}}',
+                                  encoding="utf-8")
+                made.append(common.backup_file(target, keep=3))
+            self.assertEqual(len({p.name for p in made}), 12)
+            self.assertEqual(made[0].name,
+                             "config.json.bak-20261015-120000-123456")
+            self.assertEqual(made[1].name,
+                             "config.json.bak-20261015-120000-123456-1")
+            # Pruning orders the counter numerically (-10 after -9), so the
+            # three newest survive with their own contents.
+            left = sorted(Path(td).glob("config.json.bak-*"),
+                          key=common._backup_sort_key)
+            self.assertEqual(left, made[-3:])
+            self.assertEqual([p.read_text(encoding="utf-8") for p in left],
+                             ['{"version": 10}', '{"version": 11}',
+                              '{"version": 12}'])
+
 
 class TestLiveServer(unittest.TestCase):
     def setUp(self):
